@@ -21,8 +21,8 @@ public class TxDescription
 	public long fee;
 	public long change;
 	public long minHeight;
-	public byte[] peerId;
-	public byte[] myId;
+	public String peerId;
+	public String myId;
 	public byte[] message;
 	public long createTime;
 	public long modifyTime;

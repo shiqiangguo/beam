@@ -14,7 +14,6 @@
 
 #include "wallet/wallet.h"
 #include "wallet/wallet_db.h"
-#include "wallet/keystore.h"
 #include "wallet/wallet_network.h"
 
 #include "utility/bridge.h"
@@ -49,6 +48,12 @@ namespace
 {
     namespace
     {
+        string to_string(const beam::WalletID& id)
+        {
+            static_assert(sizeof(id) == sizeof(id.m_Channel) + sizeof(id.m_Pk), "");
+            return beam::to_hex(&id, sizeof(id));
+        }
+
         static const unsigned LOG_ROTATION_PERIOD = 3 * 60 * 60 * 1000; // 3 hours
 
         template<typename Observer, typename Notifier>
@@ -203,9 +208,7 @@ namespace
     {
         using Ptr = std::shared_ptr<IWalletModelAsync>;
 
-        virtual void sendMoney(const beam::WalletID& sender, const beam::WalletID& receiver, beam::Amount&& amount, beam::Amount&& fee = 0) = 0;
         virtual void sendMoney(const beam::WalletID& receiver, const std::string& comment, beam::Amount&& amount, beam::Amount&& fee = 0) = 0;
-        virtual void restoreFromBlockchain() = 0;
         virtual void syncWithNode() = 0;
         virtual void calcChange(beam::Amount&& amount) = 0;
         virtual void getWalletStatus() = 0;
@@ -213,12 +216,11 @@ namespace
         virtual void getAddresses(bool own) = 0;
         virtual void cancelTx(const beam::TxID& id) = 0;
         virtual void deleteTx(const beam::TxID& id) = 0;
-        virtual void createNewAddress(beam::WalletAddress&& address) = 0;
-        virtual void generateNewWalletID() = 0;
+        virtual void saveAddress(const beam::WalletAddress& address, bool bOwn) = 0;
+        virtual void generateNewAddress() = 0;
         virtual void changeCurrentWalletIDs(const beam::WalletID& senderID, const beam::WalletID& receiverID) = 0;
 
         virtual void deleteAddress(const beam::WalletID& id) = 0;
-        virtual void deleteOwnAddress(const beam::WalletID& id) = 0;
 
         virtual void setNodeAddress(const std::string& addr) = 0;
 
@@ -247,29 +249,13 @@ namespace
 	{
 		BRIDGE_INIT(WalletModelBridge);
 
-		void sendMoney(const beam::WalletID& senderID, const beam::WalletID& receiverID, Amount&& amount, Amount&& fee) override
+		void sendMoney(const beam::WalletID& receiverId, const std::string& comment, beam::Amount&& amount, beam::Amount&& fee) override
 		{
-			tx.send([senderID, receiverID, amount{ move(amount) }, fee{ move(fee) }](BridgeInterface& receiver_) mutable
+			tx.send([receiverId, comment, amount{ move(amount) }, fee{ move(fee) }](BridgeInterface& receiver_) mutable
 			{
-				receiver_.sendMoney(senderID, receiverID, move(amount), move(fee));
+				receiver_.sendMoney(receiverId, comment, move(amount), move(fee));
 			});
 		}
-
-		void sendMoney(const beam::WalletID& receiverID, const std::string& comment, beam::Amount&& amount, beam::Amount&& fee) override
-		{
-			tx.send([receiverID, comment, amount{ move(amount) }, fee{ move(fee) }](BridgeInterface& receiver_) mutable
-			{
-				receiver_.sendMoney(receiverID, comment, move(amount), move(fee));
-			});
-		}
-
-        void restoreFromBlockchain() override
-        {
-            tx.send([](BridgeInterface& receiver_) mutable
-            {
-                receiver_.restoreFromBlockchain();
-            });
-        }
 
 		void syncWithNode() override
 		{
@@ -327,13 +313,21 @@ namespace
 			});
 		}
 
-		void createNewAddress(WalletAddress&& address) override
-		{
-			tx.send([address{ move(address) }](BridgeInterface& receiver_) mutable
-			{
-				receiver_.createNewAddress(move(address));
-			});
-		}
+        void generateNewAddress() override
+        {
+            tx.send([](BridgeInterface& receiver_) mutable
+            {
+                receiver_.generateNewAddress();
+            });
+        }
+
+        void saveAddress(const beam::WalletAddress& address, bool bOwn) override
+        {
+            tx.send([address, bOwn](BridgeInterface& receiver_) mutable
+            {
+                receiver_.saveAddress(address, bOwn);
+            });
+        }
 
 		void changeCurrentWalletIDs(const beam::WalletID& senderID, const beam::WalletID& receiverID) override
 		{
@@ -343,27 +337,11 @@ namespace
 			});
 		}
 
-		void generateNewWalletID() override
-		{
-			tx.send([](BridgeInterface& receiver_) mutable
-			{
-				receiver_.generateNewWalletID();
-			});
-		}
-
 		void deleteAddress(const beam::WalletID& id) override
 		{
 			tx.send([id](BridgeInterface& receiver_) mutable
 			{
 				receiver_.deleteAddress(id);
-			});
-		}
-
-		void deleteOwnAddress(const beam::WalletID& id) override
-		{
-			tx.send([id](BridgeInterface& receiver_) mutable
-			{
-				receiver_.deleteOwnAddress(id);
 			});
 		}
 
@@ -418,9 +396,9 @@ namespace
 			_startCV = make_shared<condition_variable>();
 		}
 
-		void start(const string& nodeAddr, IWalletDB::Ptr WalletDB, IKeyStore::Ptr keystore)
+		void start(const string& nodeAddr, IWalletDB::Ptr WalletDB)
 		{
-			_thread = make_shared<thread>(&WalletModel::run, this, nodeAddr, WalletDB, keystore);
+			_thread = make_shared<thread>(&WalletModel::run, this, nodeAddr, WalletDB);
 
 			{
 				unique_lock<mutex> lock(*_startMutex);
@@ -428,12 +406,11 @@ namespace
 			}
 		}
 
-        void run(const string& nodeURI, IWalletDB::Ptr walletDB, IKeyStore::Ptr keystore)
+        void run(const string& nodeURI, IWalletDB::Ptr walletDB)
         {
             try
             {
                 _walletDB = walletDB;
-                _keystore = keystore;
 
                 std::unique_ptr<WalletSubscriber> wallet_subscriber;
 
@@ -486,17 +463,11 @@ namespace
                 nnet->Connect();
                 _nnet = nnet;
 
-                auto wnet = make_shared<WalletNetworkViaBbs>(*wallet, *nnet, _keystore, _walletDB);
+                auto wnet = make_shared<WalletNetworkViaBbs>(*wallet, *nnet, _walletDB);
                 _wnet = wnet;
                 wallet->set_Network(*nnet, *wnet);
 
                 wallet_subscriber = make_unique<WalletSubscriber>(static_cast<IWalletObserver*>(this), wallet);
-
-                //if (AppModel::getInstance()->shouldRestoreWallet())
-                //{
-                //    AppModel::getInstance()->setRestoreWallet(false);
-                //    restoreFromBlockchain();
-                //}
 
                 {
                     unique_lock<mutex> lock(*_startMutex);
@@ -538,32 +509,51 @@ namespace
             env->CallStaticVoidMethod(WalletListenerClass, callback);
         }
 
+        void onGeneratedNewAddress(const WalletAddress& address)
+        {
+            LOG_DEBUG() << "onGeneratedNewAddress()";
+
+            JNIEnv* env = Android_JNI_getEnv();
+
+            jobject addr = env->AllocObject(WalletAddressClass);
+
+            {
+                setStringField(env, WalletAddressClass, addr, "walletID", to_string(address.m_walletID));
+                setStringField(env, WalletAddressClass, addr, "label", address.m_label);
+                setStringField(env, WalletAddressClass, addr, "category", address.m_category);
+                setLongField(env, WalletAddressClass, addr, "createTime", address.m_createTime);
+                setLongField(env, WalletAddressClass, addr, "duration", address.m_duration);
+                setLongField(env, WalletAddressClass, addr, "own", address.m_OwnID);
+            }
+
+            jmethodID callback = env->GetStaticMethodID(WalletListenerClass, "onGeneratedNewAddress", "(L" BEAM_JAVA_PATH "/entities/WalletAddress;)V");
+            env->CallStaticVoidMethod(WalletListenerClass, callback, addr);
+        }
+
 		///////////////////////////////////////////////
 		// IWalletModelAsync impl
 		///////////////////////////////////////////////
-		void sendMoney(const beam::WalletID& sender, const beam::WalletID& receiver, beam::Amount&& amount, beam::Amount&& fee = 0) override 
+        void saveAddress(const WalletAddress& address, bool bOwn)
         {
-            assert(!_wallet.expired());
-            auto s = _wallet.lock();
-            if (s)
+            _walletDB->saveAddress(address);
+
+            if (bOwn)
             {
-                s->transfer_money(sender, receiver, move(amount), move(fee));
+                auto s = _wnet.lock();
+                if (s)
+                {
+                    static_pointer_cast<WalletNetworkViaBbs>(s)->AddOwnAddress(address.m_OwnID, address.m_walletID);
+                }
             }
         }
 
-		void sendMoney(const beam::WalletID& receiver, const std::string& comment, beam::Amount&& amount, beam::Amount&& fee = 0) override 
+		void sendMoney(const beam::WalletID& receiver, const std::string& comment, beam::Amount&& amount, beam::Amount&& fee) override
         {
             try
             {
-                WalletID sender;
-                _keystore->gen_keypair(sender);
+                WalletAddress senderAddress = wallet::createAddress(_walletDB);
 
-                WalletAddress senderAddress;
-                senderAddress.m_walletID = sender;
-                senderAddress.m_own = true;
-                senderAddress.m_createTime = beam::getTimestamp();
-
-                createNewAddress(std::move(senderAddress));
+                saveAddress(senderAddress, true); // should update the wallet_network
 
                 ByteBuffer message(comment.begin(), comment.end());
 
@@ -571,24 +561,7 @@ namespace
                 auto s = _wallet.lock();
                 if (s)
                 {
-                    s->transfer_money(sender, receiver, move(amount), move(fee), true, move(message));
-                }
-            }
-            catch (...)
-            {
-
-            }
-        }
-
-        void restoreFromBlockchain() override
-        {
-            try
-            {
-                assert(!_wallet.expired());
-                auto s = _wallet.lock();
-                if (s)
-                {
-                    s->recover();
+                    s->transfer_money(senderAddress.m_walletID, receiver, move(amount), move(fee), true, move(message));
                 }
             }
             catch (...)
@@ -611,7 +584,7 @@ namespace
             Amount sum = 0;
             for (auto& c : coins)
             {
-                sum += c.m_amount;
+                sum += c.m_ID.m_Value;
             }
             if (sum < amount)
             {
@@ -649,29 +622,13 @@ namespace
 		void cancelTx(const beam::TxID& id) override {}
 		void deleteTx(const beam::TxID& id) override {}
 
-		void createNewAddress(beam::WalletAddress&& address) override 
-        {
-            _keystore->save_keypair(address.m_walletID, true);
-            _walletDB->saveAddress(address);
-
-            if (address.m_own)
-            {
-                auto s = _wnet.lock();
-                if (s)
-                {
-                    static_cast<WalletNetworkViaBbs&>(*s).new_own_address(address.m_walletID);
-                }
-            }
-        }
-
-		void generateNewWalletID() override 
+        void generateNewAddress() override 
         {
             try
             {
-                WalletID walletID;
-                _keystore->gen_keypair(walletID);
+                WalletAddress address = wallet::createAddress(_walletDB);
 
-                onGeneratedNewWalletID(walletID);
+                onGeneratedNewAddress(address);
             }
             catch (...)
             {
@@ -681,7 +638,6 @@ namespace
 
 		void changeCurrentWalletIDs(const beam::WalletID& senderID, const beam::WalletID& receiverID) override {}
 		void deleteAddress(const beam::WalletID& id) override {}
-		void deleteOwnAddress(const beam::WalletID& id)  override {}
 		void setNodeAddress(const std::string& addr) override {}
 		void changeWalletPassword(const beam::SecString& password) override {}
 
@@ -740,8 +696,10 @@ namespace
 					setLongField(env, 			TxDescriptionClass, tx, "fee", item.m_fee);
 					setLongField(env, 			TxDescriptionClass, tx, "change", item.m_change);
 					setLongField(env, 			TxDescriptionClass, tx, "minHeight", item.m_minHeight);
-					setByteArrayField(env, 		TxDescriptionClass, tx, "peerId", item.m_peerId);
-					setByteArrayField(env, 		TxDescriptionClass, tx, "myId", item.m_myId);
+
+					setStringField(env, 		TxDescriptionClass, tx, "peerId", to_string(item.m_peerId));
+                    setStringField(env, 		TxDescriptionClass, tx, "myId", to_string(item.m_myId));
+
 					setByteArrayField(env, 		TxDescriptionClass, tx, "message", item.m_message);
 					setLongField(env, 			TxDescriptionClass, tx, "createTime", item.m_createTime);
 					setLongField(env, 			TxDescriptionClass, tx, "modifyTime", item.m_modifyTime);
@@ -775,7 +733,7 @@ namespace
 
 					jobject tx = env->AllocObject(TxPeerClass);
 
-					setByteArrayField(env, TxPeerClass, tx, "walletID", item.m_walletID);
+                    setStringField(env, TxPeerClass, tx, "walletID", to_string(item.m_walletID));
                     setStringField(env, TxPeerClass, tx, "label", item.m_label);
                     setStringField(env, TxPeerClass, tx, "address", item.m_address);
 
@@ -795,19 +753,6 @@ namespace
             jmethodID callback = env->GetStaticMethodID(WalletListenerClass, "onSyncProgressUpdated", "(II)V");
 
             env->CallStaticVoidMethod(WalletListenerClass, callback, done, total);
-        }
-
-        void onRecoverProgressUpdated(int done, int total, const std::string& message)
-        {
-            LOG_DEBUG() << "onRecoverProgressUpdated(" << done << ", " << total << ", " << message << ")";
-
-            JNIEnv* env = Android_JNI_getEnv();
-
-            jstring messageObj = env->NewStringUTF(message.c_str());
-
-            jmethodID callback = env->GetStaticMethodID(WalletListenerClass, "onRecoverProgressUpdated", "(IILjava/lang/String;)V");
-
-            env->CallStaticVoidMethod(WalletListenerClass, callback, done, total, messageObj);
         }
 
 		void onChangeCalculated(beam::Amount change) 
@@ -839,14 +784,13 @@ namespace
 
 					jobject utxo = env->AllocObject(UtxoClass);
 
-					setLongField(env, UtxoClass, utxo, "id", coin.m_id);
-					setLongField(env, UtxoClass, utxo, "amount", coin.m_amount);
+					setLongField(env, UtxoClass, utxo, "id", coin.m_ID.m_Idx);
+					setLongField(env, UtxoClass, utxo, "amount", coin.m_ID.m_Value);
 					setIntField(env, UtxoClass, utxo, "status", coin.m_status);
 					setLongField(env, UtxoClass, utxo, "createHeight", coin.m_createHeight);
 					setLongField(env, UtxoClass, utxo, "maturity", coin.m_maturity);
-					setIntField(env, UtxoClass, utxo, "keyType", static_cast<jint>(coin.m_key_type));
+					setIntField(env, UtxoClass, utxo, "keyType", static_cast<jint>(coin.m_ID.m_Type));
 					setLongField(env, UtxoClass, utxo, "confirmHeight", coin.m_confirmHeight);
-					setByteArrayField(env, UtxoClass, utxo, "confirmHash", coin.m_confirmHash);
 					setLongField(env, UtxoClass, utxo, "lockHeight", coin.m_lockedHeight);
 
 					if(coin.m_createTxId)
@@ -884,12 +828,12 @@ namespace
                     jobject addr = env->AllocObject(WalletAddressClass);
 
                     {
-                        setByteArrayField(env, WalletAddressClass, addr, "walletID", addrRef.m_walletID);
+                        setStringField(env, WalletAddressClass, addr, "walletID", to_string(addrRef.m_walletID));
                         setStringField(env, WalletAddressClass, addr, "label", addrRef.m_label);
                         setStringField(env, WalletAddressClass, addr, "category", addrRef.m_category);
                         setLongField(env, WalletAddressClass, addr, "createTime", addrRef.m_createTime);
                         setLongField(env, WalletAddressClass, addr, "duration", addrRef.m_duration);
-                        setBooleanField(env, WalletAddressClass, addr, "own", addrRef.m_own);
+                        setLongField(env, WalletAddressClass, addr, "own", addrRef.m_OwnID);
                     }
 
                     env->SetObjectArrayElement(addrArray, i, addr);
@@ -899,21 +843,6 @@ namespace
             jmethodID callback = env->GetStaticMethodID(WalletListenerClass, "onAdrresses", "(Z[L" BEAM_JAVA_PATH "/entities/WalletAddress;)V");
             env->CallStaticVoidMethod(WalletListenerClass, callback, own, addrArray);
         }
-
-		void onGeneratedNewWalletID(const beam::WalletID& walletID) 
-        {
-            LOG_DEBUG() << "onGeneratedNewWalletID()";
-
-            JNIEnv* env = Android_JNI_getEnv();
-
-            jbyteArray id = env->NewByteArray(WalletID::nBytes);
-            env->SetByteArrayRegion(id, 0, WalletID::nBytes, reinterpret_cast<const jbyte*>(walletID.m_pData));
-            
-            jmethodID callback = env->GetStaticMethodID(WalletListenerClass, "onGeneratedNewWalletID", "([B)V");
-            env->CallStaticVoidMethod(WalletListenerClass, callback, id);
-        }
-
-		void onChangeCurrentWalletIDs(beam::WalletID senderID, beam::WalletID receiverID) {}
 
 		///////////////////////////////////////////////
 		// IWalletObserver impl
@@ -951,35 +880,30 @@ namespace
 			onSyncProgressUpdated(done, total);
 		}
 
-        void onRecoverProgress(int done, int total, const std::string& message) override
-        {
-            onRecoverProgressUpdated(done, total, message);
-        }
-
 		WalletStatus getStatus() const
 		{
-			WalletStatus status{ wallet::getAvailable(_walletDB), 0, 0, 0};
+            WalletStatus status{ wallet::getAvailable(_walletDB), 0, 0, 0 };
 
-			auto history = _walletDB->getTxHistory();
+            auto history = _walletDB->getTxHistory();
 
-			for (const auto& item : history)
-			{
-			   switch (item.m_status)
-			   {
-			   case TxStatus::Completed:
-				   (item.m_sender ? status.sent : status.received) += item.m_amount;
-				   break;
-			   default: break;
-			   }
-			}
+            for (const auto& item : history)
+            {
+                switch (item.m_status)
+                {
+                case TxStatus::Completed:
+                    (item.m_sender ? status.sent : status.received) += item.m_amount;
+                    break;
+                default: break;
+                }
+            }
 
-			status.unconfirmed += wallet::getTotal(_walletDB, Coin::Unconfirmed);
+            status.unconfirmed += wallet::getTotal(_walletDB, Coin::Incoming) + wallet::getTotal(_walletDB, Coin::Change);
 
-			status.update.lastTime = _walletDB->getLastUpdateTime();
-			ZeroObject(status.stateID);
-			_walletDB->getSystemStateID(status.stateID);
+            status.update.lastTime = _walletDB->getLastUpdateTime();
+            ZeroObject(status.stateID);
+            _walletDB->getSystemStateID(status.stateID);
 
-			return status;
+            return status;
 		}
 
 		vector<Coin> getUtxos() const
@@ -1000,10 +924,10 @@ namespace
 		shared_ptr<thread> _thread;
 
         beam::IWalletDB::Ptr _walletDB;
-        beam::IKeyStore::Ptr _keystore;
         beam::io::Reactor::Ptr _reactor;
+        IWalletModelAsync::Ptr _async;
         std::weak_ptr<beam::proto::FlyClient::INetwork> _nnet;
-        std::weak_ptr<beam::Wallet::INetwork> _wnet;
+        std::weak_ptr<beam::IWalletNetwork> _wnet;
         std::weak_ptr<beam::Wallet> _wallet;
         beam::io::Timer::Ptr _logRotateTimer;
 
@@ -1082,26 +1006,9 @@ JNIEXPORT jobject JNICALL BEAM_JAVA_API_INTERFACE(createWallet)(JNIEnv *env, job
 	{
 		LOG_DEBUG() << "wallet successfully created.";
 
-		IKeyStore::Options options;
-		options.flags = IKeyStore::Options::local_file | IKeyStore::Options::enable_all_keys;
-		options.fileName = appData + "/" BBS_FILENAME;
-
-		IKeyStore::Ptr keystore = IKeyStore::create(options, pass.data(), pass.size());
-
-		// generate default address
-		WalletAddress defaultAddress = {};
-		defaultAddress.m_own = true;
-		defaultAddress.m_label = "default";
-		defaultAddress.m_createTime = getTimestamp();
-		defaultAddress.m_duration = numeric_limits<uint64_t>::max();
-		keystore->gen_keypair(defaultAddress.m_walletID);
-		keystore->save_keypair(defaultAddress.m_walletID, true);
-
-		wallet->saveAddress(defaultAddress);
-
 		jobject walletObj = regWallet(env, thiz);
 
-		getWallet(env, walletObj).start(JString(env, nodeAddrStr).value(), wallet, keystore);
+		getWallet(env, walletObj).start(JString(env, nodeAddrStr).value(), wallet);
 
 		return walletObj;
 	}
@@ -1135,15 +1042,9 @@ JNIEXPORT jobject JNICALL BEAM_JAVA_API_INTERFACE(openWallet)(JNIEnv *env, jobje
 	{
 		LOG_DEBUG() << "wallet successfully opened.";
 
-		IKeyStore::Options options;
-		options.flags = IKeyStore::Options::local_file | IKeyStore::Options::enable_all_keys;
-		options.fileName = appData + "/" BBS_FILENAME;
-
-		IKeyStore::Ptr keystore = IKeyStore::create(options, pass.data(), pass.size());
-
 		jobject walletObj = regWallet(env, thiz);
 
-		getWallet(env, walletObj).start(JString(env, nodeAddrStr).value(), wallet, keystore);
+		getWallet(env, walletObj).start(JString(env, nodeAddrStr).value(), wallet);
 
 		return walletObj;
 	}
@@ -1195,7 +1096,16 @@ JNIEXPORT void JNICALL BEAM_JAVA_WALLET_INTERFACE(sendMoney)(JNIEnv *env, jobjec
 {
 	LOG_DEBUG() << "sendMoney(" << JString(env, receiverAddr).value() << ", " << JString(env, comment).value() << ", " << amount << ", " << fee << ")";
 
-	getWallet(env, thiz).async->sendMoney(from_hex(JString(env, receiverAddr).value())
+    WalletAddress peerAddr;
+    peerAddr.m_walletID.FromHex(JString(env, receiverAddr).value());
+    peerAddr.m_createTime = getTimestamp();
+
+    // TODO: implement UI for this situation
+    // TODO: don't save if you send to yourself
+    getWallet(env, thiz).async->saveAddress(peerAddr, false);
+
+    // TODO: show 'operation in process' animation here?
+	getWallet(env, thiz).async->sendMoney(peerAddr.m_walletID
         , JString(env, comment).value()
         , beam::Amount(amount)
         , beam::Amount(fee));
@@ -1215,38 +1125,6 @@ JNIEXPORT void JNICALL BEAM_JAVA_WALLET_INTERFACE(getAddresses)(JNIEnv *env, job
     LOG_DEBUG() << "getAddresses(" << own << ")";
 
     getWallet(env, thiz).async->getAddresses(own);
-}
-
-JNIEXPORT void JNICALL BEAM_JAVA_WALLET_INTERFACE(generateNewWalletID)(JNIEnv *env, jobject thiz)
-{
-    LOG_DEBUG() << "generateNewWalletID()";
-
-    getWallet(env, thiz).async->generateNewWalletID();
-}
-
-JNIEXPORT void JNICALL BEAM_JAVA_WALLET_INTERFACE(createNewAddress)(JNIEnv *env, jobject thiz
-    , jobject walletAddrObj)
-{
-    LOG_DEBUG() << "createNewAddress()";
-
-    WalletAddress ownAddress{};
-
-    getByteArrayField(env, WalletAddressClass, walletAddrObj, "walletID", ownAddress.m_walletID.m_pData);
-    ownAddress.m_label = getStringField(env, WalletAddressClass, walletAddrObj, "label");
-    ownAddress.m_category = getStringField(env, WalletAddressClass, walletAddrObj, "category");
-    ownAddress.m_createTime = getLongField(env, WalletAddressClass, walletAddrObj, "createTime");
-    ownAddress.m_duration = getLongField(env, WalletAddressClass, walletAddrObj, "duration");
-    ownAddress.m_own = getBooleanField(env, WalletAddressClass, walletAddrObj, "own");
-
-
-    getWallet(env, thiz).async->createNewAddress(move(ownAddress));
-}
-
-JNIEXPORT void JNICALL BEAM_JAVA_WALLET_INTERFACE(restoreFromBlockchain)(JNIEnv *env, jobject thiz)
-{
-    LOG_DEBUG() << "restoreFromBlockchain()";
-
-    getWallet(env, thiz).async->restoreFromBlockchain();
 }
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)

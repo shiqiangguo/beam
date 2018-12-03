@@ -18,10 +18,10 @@ import java.util.*;
 
 public class WalletAddress
 {
-    public byte[] walletID;
+    public String walletID;
     public String label;
     public String category;
     public long createTime;
     public long duration;
-    public boolean own;
+    public long own;
 }

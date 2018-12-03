@@ -86,33 +86,22 @@ endif()
 
 configure_file("${CMAKE_SOURCE_DIR}/version.h.in" "${CMAKE_CURRENT_BINARY_DIR}/version.h")
 
-add_subdirectory(qrcode)
 add_dependencies(${TARGET_NAME} wallet mnemonic qrcode)
 target_link_libraries(${TARGET_NAME} qrcode)
+
+if(BEAM_USE_GPU)
+    add_dependencies(${TARGET_NAME} gpu_tools)
+    target_link_libraries(${TARGET_NAME} gpu_tools)
+endif()
 
 if(LINUX)
 	set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
 
 # link with QuaZip library
-include_directories(${CMAKE_PREFIX_PATH}/include/QtZlib)
-include_directories(quazip)
+target_include_directories(${TARGET_NAME} PRIVATE ${CMAKE_PREFIX_PATH}/include/QtZlib)
+target_include_directories(${TARGET_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/3rdparty/quazip)
 add_definitions(-DQUAZIP_STATIC)
-file(GLOB QUAZIP_SRCS "quazip/quazip/*.c" "quazip/quazip/*.cpp")
-file(GLOB PUBLIC_HEADERS "quazip/quazip/*.h")
-qt_wrap_cpp(MOC_SRCS ${PUBLIC_HEADERS})
-set(QUAZIP_ALL_SRCS ${QUAZIP_SRCS} ${MOC_SRCS})
-include_directories(${Qt5Core_INCLUDE_DIRS})
-add_library(quazip_static STATIC ${QUAZIP_ALL_SRCS})
-
-if(MSVC)
-    target_compile_options(quazip_static PRIVATE "/wd4456")
-    target_compile_options(quazip_static PRIVATE "/wd4131")
-    target_compile_options(quazip_static PRIVATE "/wd4244")
-endif()
-if(UNIX)
-	target_link_libraries(quazip_static z)
-endif()
 
 add_dependencies(${TARGET_NAME} quazip_static)
 target_link_libraries(${TARGET_NAME} quazip_static)

@@ -16,7 +16,7 @@ package com.mw.beam.beamwallet.core.entities;
 
 public class TxPeer
 {
-	public byte[] walletID;
+	public String walletID;
     public String label;
     public String address;
 }

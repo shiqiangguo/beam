@@ -21,6 +21,10 @@
 #include <thread>
 #include "wallet/secstring.h"
 
+#ifdef BEAM_USE_GPU
+#include "utility/gpu/gpu_tools.h"
+#endif
+
 using namespace beam;
 using namespace ECC;
 using namespace std;
@@ -96,21 +100,6 @@ void SettingsViewModel::setLocalNodeMiningThreads(uint value)
     }
 }
 
-uint SettingsViewModel::getLocalNodeVerificationThreads() const
-{
-    return m_localNodeVerificationThreads;
-}
-
-void SettingsViewModel::setLocalNodeVerificationThreads(uint value)
-{
-    if (value != m_localNodeVerificationThreads)
-    {
-        m_localNodeVerificationThreads = value;
-        emit localNodeVerificationThreadsChanged();
-        emit propertiesChanged();
-    }
-}
-
 int SettingsViewModel::getLockTimeout() const
 {
     return m_lockTimeout;
@@ -164,13 +153,26 @@ bool SettingsViewModel::showUseGpu() const
 #endif
 }
 
+bool SettingsViewModel::hasSupportedGpu()
+{
+#ifdef BEAM_USE_GPU
+    if (!HasSupportedCard())
+    {
+        setUseGpu(false);
+        return false;
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
 bool SettingsViewModel::isChanged() const
 {
     return m_nodeAddress != m_settings.getNodeAddress()
         || m_localNodeRun != m_settings.getRunLocalNode()
         || m_localNodePort != m_settings.getLocalNodePort()
         || m_localNodeMiningThreads != m_settings.getLocalNodeMiningThreads()
-        || m_localNodeVerificationThreads != m_settings.getLocalNodeVerificationThreads()
         || m_localNodePeers != m_settings.getLocalNodePeers()
 #ifdef BEAM_USE_GPU
         || m_lockTimeout != m_settings.getLockTimeout()
@@ -186,7 +188,6 @@ void SettingsViewModel::applyChanges()
     m_settings.setRunLocalNode(m_localNodeRun);
     m_settings.setLocalNodePort(m_localNodePort);
     m_settings.setLocalNodeMiningThreads(m_localNodeMiningThreads);
-    m_settings.setLocalNodeVerificationThreads(m_localNodeVerificationThreads);
     m_settings.setLocalNodePeers(m_localNodePeers);
     m_settings.setLockTimeout(m_lockTimeout);
 #ifdef BEAM_USE_GPU
@@ -237,7 +238,6 @@ void SettingsViewModel::undoChanges()
     setLocalNodeRun(m_settings.getRunLocalNode());
     setLocalNodePort(m_settings.getLocalNodePort());
     setLocalNodeMiningThreads(m_settings.getLocalNodeMiningThreads());
-    setLocalNodeVerificationThreads(m_settings.getLocalNodeVerificationThreads());
     setLockTimeout(m_settings.getLockTimeout());
     setLocalNodePeers(m_settings.getLocalNodePeers());
 #ifdef BEAM_USE_GPU

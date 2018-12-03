@@ -86,11 +86,6 @@ public class WalletListener
 		System.out.println(">>>>>>>>>>>>>> async onSyncProgressUpdated in Java [ " + done + " / " + total + " ]");
 	}
 
-	static void onRecoverProgressUpdated(int done, int total, String message)
-	{
-		System.out.println(">>>>>>>>>>>>>> async onRecoverProgressUpdated in Java [ " + done + " / " + total + " ], message: " + message);
-	}
-
 	static void onChangeCalculated(long amount)
 	{
 		System.out.println(">>>>>>>>>>> onChangeCalculated(" + amount + ") called");
@@ -131,30 +126,19 @@ public class WalletListener
 
 			for(int i = 0; i < addresses.length; i++)
 			{
-				System.out.println(addresses[i].walletID.toString());
+				System.out.println(addresses[i].walletID);
 			}
 
 			System.out.println("+-------------------------------------------------------");	
 		}
 	}
 
-	static void onGeneratedNewWalletID(byte[] walletID)
+	static void onGeneratedNewAddress(WalletAddress addr)
 	{
-		System.out.println(">>>>>>>>>>> onGeneratedNewWalletID(" + walletID.toString() + ") called");
+		System.out.println(">>>>>>>>>>> onGeneratedNewAddress() called");
 
-		// great, create QR code here and save new address to the DB by calling Wallet.createNewAddress()
-
-		WalletAddress addr = new WalletAddress();
-		addr.walletID = walletID;
-		addr.own = true;
-		addr.label = "Vasya Pupkin";
-		addr.category = "";
-    	addr.createTime = 1542644941; // timestamp
-
-		wallet.createNewAddress(addr);
+		System.out.println(addr.walletID);
 	}
-
-	static void onChangeCurrentWalletIDs(){} //beam::WalletID senderID, beam::WalletID receiverID) {}
 
 	static void onNodeConnectedStatusChanged(boolean isNodeConnected)
 	{

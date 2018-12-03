@@ -128,7 +128,7 @@ Rectangle {
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.alignment: Qt.AlignTop
-                        height: 360
+                        height: 320
                         radius: 10
                         color: Style.dark_slate_blue
 
@@ -215,29 +215,6 @@ Rectangle {
                                             value: localNodeMiningThreads.value
                                         }
                                     }
-
-                                    SFText {
-                                        text: qsTr("Verification threads")
-                                        color: localNodeRun.checked ? Style.white : Style.disable_text_color
-                                        font.pixelSize: 12
-                                        font.styleName: "Bold"; font.weight: Font.Bold
-                                    }
-
-                                    FeeSlider {
-                                        id: localNodeVerificationThreads
-                                        precision: 0
-                                        showTicks: true
-                                        Layout.fillWidth: true
-                                        value: viewModel.localNodeVerificationThreads
-                                        to: {viewModel.coreAmount()}
-                                        stepSize: 1
-                                        enabled: localNodeRun.checked
-                                        Binding {
-                                            target: viewModel
-                                            property: "localNodeVerificationThreads"
-                                            value: localNodeVerificationThreads.value
-                                        }
-                                    }
                                 }
                                 ColumnLayout {
                                     Layout.fillWidth: true
@@ -250,13 +227,20 @@ Rectangle {
                                         font.pixelSize: 12
                                         width: parent.width
                                         checked: viewModel.useGpu
-                                        enabled: localNodeRun.checked
+                                        enabled: localNodeRun.checked && viewModel.hasSupportedGpu()
                                         visible: viewModel.showUseGpu()
                                         Binding {
                                             target: viewModel
                                             property: "useGpu"
                                             value: useGpu.checked
                                         }
+                                    }
+                                    SFText {
+                                        id: gpuError
+                                        color: Style.validator_color
+                                        font.pixelSize: 14
+                                        visible: viewModel.showUseGpu() && !viewModel.hasSupportedGpu()
+                                        text: qsTr("You have unsupported videocard")
                                     }
 
                                     SFText {
@@ -411,7 +395,7 @@ Rectangle {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 360
+                        height: 320
                         radius: 10
                         color: Style.dark_slate_blue
 
