@@ -195,6 +195,7 @@ namespace ECC
 			static const uint32_t Identity  = FOURCC_FROM(iden); // Node-Wallet auth
 			static const uint32_t ChildKey  = FOURCC_FROM(SubK);
 			static const uint32_t Bbs       = FOURCC_FROM(BbsM);
+			static const uint32_t Decoy     = FOURCC_FROM(dcoy);
 		};
 
 		struct ID
@@ -266,8 +267,9 @@ namespace ECC
 		{
 			typedef std::shared_ptr<IPKdf> Ptr;
 
-			virtual void DerivePKey(Point::Native&, const Hash::Value&) = 0;
 			virtual void DerivePKey(Scalar::Native&, const Hash::Value&) = 0;
+			virtual void DerivePKeyG(Point::Native&, const Hash::Value&) = 0;
+			virtual void DerivePKeyJ(Point::Native&, const Hash::Value&) = 0;
 
 			bool IsSame(IPKdf&);
 		};
@@ -279,6 +281,9 @@ namespace ECC
 
 			void DeriveKey(Scalar::Native&, const Key::ID&);
 			virtual void DeriveKey(Scalar::Native&, const Hash::Value&) = 0;
+
+			virtual void DerivePKeyG(Point::Native&, const Hash::Value&) override;
+			virtual void DerivePKeyJ(Point::Native&, const Hash::Value&) override;
 		};
 	};
 

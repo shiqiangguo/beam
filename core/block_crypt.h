@@ -100,6 +100,7 @@ namespace beam
 		uint32_t MaxRollbackHeight = 1440; // 1 day roughly
 		uint32_t MacroblockGranularity = 720; // i.e. should be created for heights that are multiples of this. This should make it more likely for different nodes to have the same macroblocks
 
+		ECC::Hash::Value Prehistoric; // Prev hash of the 1st block
 		ECC::Hash::Value TreasuryChecksum;
 		ECC::Hash::Value Checksum;
 
@@ -112,6 +113,14 @@ namespace beam
 	private:
 		Amount get_EmissionEx(Height, Height& hEnd, Amount base) const;
 	};
+
+	namespace SwitchCommitment
+	{
+		void Create(ECC::Scalar::Native& sk, Key::IKdf&, const Key::IDV&);
+		void Create(ECC::Scalar::Native& sk, ECC::Point::Native& comm, Key::IKdf&, const Key::IDV&);
+		void Create(ECC::Scalar::Native& sk, ECC::Point& comm, Key::IKdf&, const Key::IDV&);
+		void Recover(ECC::Point::Native& comm, Key::IPKdf&, const Key::IDV&);
+	}
 
 	struct TxElement
 	{
@@ -188,7 +197,6 @@ namespace beam
 		std::unique_ptr<ECC::RangeProof::Confidential>	m_pConfidential;
 		std::unique_ptr<ECC::RangeProof::Public>		m_pPublic;
 
-		void Create(const ECC::Scalar::Native&, Amount, bool bPublic = false);
 		void Create(ECC::Scalar::Native&, Key::IKdf&, const Key::IDV&, bool bPublic = false);
 
 		bool Recover(Key::IPKdf&, Key::IDV&) const;
@@ -201,7 +209,6 @@ namespace beam
 		COMPARISON_VIA_CMP
 
 	private:
-		void CreateInternal(const ECC::Scalar::Native&, Amount, bool bPublic, Key::IKdf*, const Key::ID*);
 		void get_SeedKid(ECC::uintBig&, Key::IPKdf&) const;
 	};
 

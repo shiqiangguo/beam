@@ -109,7 +109,10 @@ void NodeProcessor::InitCursor()
 		m_Cursor.m_LoHorizon = m_DB.ParamIntGetDef(NodeDB::ParamID::LoHorizon);
 	}
 	else
+	{
 		ZeroObject(m_Cursor);
+		m_Cursor.m_ID.m_Hash = Rules::get().Prehistoric;
+	}
 
 	m_Cursor.m_DifficultyNext = get_NextDifficulty();
 }
@@ -775,6 +778,15 @@ void NodeProcessor::RecognizeUtxos(TxBase::IReader&& r, Height hMax)
 		Walker w(x);
 		if (!EnumViewerKeys(w))
 		{
+			// filter-out dummies
+			if (w.m_Value.m_Kidv.m_Value == Zero)
+			{
+				uint32_t nType;
+				w.m_Value.m_Kidv.m_Type.Export(nType);
+				if (Key::Type::Decoy == nType)
+					continue;
+			}
+
 			// bingo!
 			Height h;
 			if (x.m_Maturity)
@@ -1435,10 +1447,7 @@ size_t NodeProcessor::GenerateNewBlockInternal(BlockContext& bc)
 
 void NodeProcessor::GenerateNewHdr(BlockContext& bc)
 {
-	if (m_Cursor.m_Sid.m_Row)
-		bc.m_Hdr.m_Prev = m_Cursor.m_ID.m_Hash;
-	else
-		ZeroObject(bc.m_Hdr.m_Prev);
+	bc.m_Hdr.m_Prev = m_Cursor.m_ID.m_Hash;
 
 	get_Definition(bc.m_Hdr.m_Definition, true);
 
