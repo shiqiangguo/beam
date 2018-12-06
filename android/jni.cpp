@@ -533,7 +533,7 @@ namespace
 		///////////////////////////////////////////////
 		// IWalletModelAsync impl
 		///////////////////////////////////////////////
-        void saveAddress(const WalletAddress& address, bool bOwn)
+        void saveAddress(const WalletAddress& address, bool bOwn) override
         {
             _walletDB->saveAddress(address);
 
