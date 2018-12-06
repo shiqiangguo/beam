@@ -1127,6 +1127,30 @@ JNIEXPORT void JNICALL BEAM_JAVA_WALLET_INTERFACE(getAddresses)(JNIEnv *env, job
     getWallet(env, thiz).async->getAddresses(own);
 }
 
+JNIEXPORT void JNICALL BEAM_JAVA_WALLET_INTERFACE(generateNewAddress)(JNIEnv *env, jobject thiz)
+{
+	LOG_DEBUG() << "generateNewAddress()";
+
+	getWallet(env, thiz).async->generateNewAddress();
+}
+
+JNIEXPORT void JNICALL BEAM_JAVA_WALLET_INTERFACE(saveAddress)(JNIEnv *env, jobject thiz,
+	jobject walletAddrObj, jboolean own)
+{
+	LOG_DEBUG() << "saveAddress()";
+
+    WalletAddress addr;
+
+    addr.m_walletID.FromHex(getStringField(env, WalletAddressClass, walletAddrObj, "walletID"));
+	addr.m_label = getStringField(env, WalletAddressClass, walletAddrObj, "label");
+	addr.m_category = getStringField(env, WalletAddressClass, walletAddrObj, "category");
+	addr.m_createTime = getLongField(env, WalletAddressClass, walletAddrObj, "createTime");
+	addr.m_duration = getLongField(env, WalletAddressClass, walletAddrObj, "duration");
+	addr.m_OwnID = getLongField(env, WalletAddressClass, walletAddrObj, "own");
+
+	getWallet(env, thiz).async->saveAddress(addr, own);
+}
+
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved)
 {
 	JNIEnv *env;

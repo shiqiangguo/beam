@@ -68,18 +68,18 @@ public class WalletJNI
 				wallet.getAddresses(true);
 				wallet.getAddresses(false);
 
-				if(!addrGenearteAttempt)
-				{
-					addrGenearteAttempt = true;
-					wallet.generateNewWalletID();
-				}
-
-				// if(!sendAttempt)
+				// if(!addrGenearteAttempt)
 				// {
-				// 	sendAttempt = true;
-
-				// 	wallet.sendMoney("fbac2507faf499581aff0a2b97bccf5e4705aa36714ca14a529e98e8c4641ab7", "test comment", 1500, 10);
+				// 	addrGenearteAttempt = true;
+				// 	wallet.generateNewAddress();
 				// }
+
+				if(!sendAttempt)
+				{
+					sendAttempt = true;
+
+					wallet.sendMoney("fbac2507faf499581aff0a2b97bccf5e4705aa36714ca14a529e98e8c4641ab7", "test comment", 1500, 10);
+				}
 			}
 			try
 			{

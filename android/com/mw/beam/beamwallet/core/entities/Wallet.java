@@ -28,16 +28,17 @@ public class Wallet
     public native void sendMoney(String receiver, String comment, long amount, long fee);
     public native void calcChange(long amount);
     public native void getAddresses(boolean own);
-    public native void generateNewWalletID();
-    public native void createNewAddress(WalletAddress address);
-    public native void restoreFromBlockchain();
+    public native void generateNewAddress();
+    public native void saveAddress();//const beam::WalletAddress& address, bool bOwn) = 0;
+
     
     // not implemented
     public native void cancelTx();//const beam::TxID& id);
     public native void deleteTx();//const beam::TxID& id);
     public native void changeCurrentWalletIDs();//const beam::WalletID& senderID, const beam::WalletID& receiverID);
     public native void deleteAddress();//const beam::WalletID& id);
-    public native void deleteOwnAddress();//const beam::WalletID& id) ;
     public native void setNodeAddress();//const std::string& addr);
     public native void changeWalletPassword();//const beam::SecString& password);
+
 }
+       
