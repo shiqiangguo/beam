@@ -29,7 +29,7 @@ public class Wallet
     public native void calcChange(long amount);
     public native void getAddresses(boolean own);
     public native void generateNewAddress();
-    public native void saveAddress();//const beam::WalletAddress& address, bool bOwn) = 0;
+    public native void saveAddress(WalletAddress address, boolean own);
 
     
     // not implemented
