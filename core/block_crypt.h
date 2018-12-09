@@ -382,12 +382,12 @@ namespace beam
 			static const uint32_t K = 5;
 
 			static const uint32_t nNumIndices		= 1 << K; // 32
-			static const uint32_t nBitsPerIndex		= N / (K + 1) + 1; // 21
+			static const uint32_t nBitsPerIndex		= N / (K + 1) + 1; // 26
 
-			static const uint32_t nSolutionBits		= nNumIndices * nBitsPerIndex; // 672 bits
+			static const uint32_t nSolutionBits		= nNumIndices * nBitsPerIndex; // 832 bits
 
 			static_assert(!(nSolutionBits & 7), "PoW solution should be byte-aligned");
-			static const uint32_t nSolutionBytes	= nSolutionBits >> 3; // 84 bytes
+			static const uint32_t nSolutionBytes	= nSolutionBits >> 3; // 104 bytes
 
 			std::array<uint8_t, nSolutionBytes>	m_Indices;
 

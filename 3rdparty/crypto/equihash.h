@@ -166,7 +166,7 @@ class Equihash
 {
 private:
     static_assert(K < N);
-    static_assert(N % 8 == 0);
+    //static_assert(N % 8 == 0);
     static_assert((N/(K+1)) + 1 < 8*sizeof(eh_index));
 
 public:
