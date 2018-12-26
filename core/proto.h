@@ -136,7 +136,7 @@ namespace proto {
 
 #define BeamNodeMsg_BbsMsg(macro) \
     macro(BbsChannel, Channel) \
-    macro(Timestamp, TimePosted) \
+    macro(Height, HeightPosted) \
     macro(ByteBuffer, Message)
 
 #define BeamNodeMsg_BbsHaveMsg(macro) \
@@ -147,7 +147,7 @@ namespace proto {
 
 #define BeamNodeMsg_BbsSubscribe(macro) \
     macro(BbsChannel, Channel) \
-    macro(Timestamp, TimeFrom) \
+    macro(Height, HeightFrom) \
     macro(bool, On)
 
 #define BeamNodeMsg_BbsPickChannel(macro)

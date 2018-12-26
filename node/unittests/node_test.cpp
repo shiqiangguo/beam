@@ -457,7 +457,7 @@ namespace beam
 		{
 			dBbs.m_Key = i;
 			dBbs.m_Channel = i % 7;
-			dBbs.m_TimePosted = i + 100;
+			dBbs.m_HeightPosted = i + 100;
 			dBbs.m_Message.p = "hello";
 			dBbs.m_Message.n = 5;
 
@@ -1251,7 +1251,7 @@ namespace beam
 
 				proto::BbsMsg msgBbs;
 				msgBbs.m_Channel = 11;
-				msgBbs.m_TimePosted = getTimestamp();
+				msgBbs.m_HeightPosted = msg.m_Description.m_Height;
 				msgBbs.m_Message.resize(1);
 				msgBbs.m_Message[0] = (uint8_t) msg.m_Description.m_Height;
 				Send(msgBbs);

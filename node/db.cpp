@@ -70,7 +70,7 @@ namespace beam {
 #define TblBbs_ID				"ID"
 #define TblBbs_Key				"Key"
 #define TblBbs_Channel			"Channel"
-#define TblBbs_Time				"Time"
+#define TblBbs_Height			"Height"
 #define TblBbs_Msg				"Message"
 
 #define TblDummy				"Dummies"
@@ -255,7 +255,7 @@ void NodeDB::Open(const char* szPath)
 		bCreate = !rs.Step();
 	}
 
-	const uint64_t nVersion = 14;
+	const uint64_t nVersion = 15;
 
 	if (bCreate)
 	{
@@ -349,12 +349,12 @@ void NodeDB::Create()
 		"[" TblBbs_ID		"] INTEGER PRIMARY KEY AUTOINCREMENT,"
 		"[" TblBbs_Key		"] BLOB NOT NULL,"
 		"[" TblBbs_Channel	"] INTEGER NOT NULL,"
-		"[" TblBbs_Time		"] INTEGER NOT NULL,"
+		"[" TblBbs_Height		"] INTEGER NOT NULL,"
 		"[" TblBbs_Msg		"] BLOB NOT NULL)");
 
-	ExecQuick("CREATE INDEX [Idx" TblBbs "CT] ON [" TblBbs "] ([" TblBbs_Channel "],[" TblBbs_Time "]);"); // Find cursor for specific channel and mimimal Time
+	ExecQuick("CREATE INDEX [Idx" TblBbs "CT] ON [" TblBbs "] ([" TblBbs_Channel "],[" TblBbs_Height "]);"); // Find cursor for specific channel and mimimal Time
 	ExecQuick("CREATE INDEX [Idx" TblBbs "CSeq] ON [" TblBbs "] ([" TblBbs_Channel "],[" TblBbs_ID "]);"); // fetch messages for specific channel ordered by ID
-	ExecQuick("CREATE INDEX [Idx" TblBbs "T] ON [" TblBbs "] ([" TblBbs_Time "]);"); // delete old messages
+	ExecQuick("CREATE INDEX [Idx" TblBbs "T] ON [" TblBbs "] ([" TblBbs_Height "]);"); // delete old messages
 
 	ExecQuick("CREATE TABLE [" TblDummy "] ("
 		"[" TblDummy_ID				"] INTEGER NOT NULL PRIMARY KEY,"
@@ -1556,7 +1556,7 @@ void NodeDB::PeerIns(const WalkerPeer::Data& d)
 	TestChanged1Row();
 }
 
-#define TblBbs_InsFieldsListed TblBbs_Key "," TblBbs_Channel "," TblBbs_Time "," TblBbs_Msg
+#define TblBbs_InsFieldsListed TblBbs_Key "," TblBbs_Channel "," TblBbs_Height "," TblBbs_Msg
 #define TblBbs_AllFieldsListed TblBbs_ID "," TblBbs_InsFieldsListed
 
 void NodeDB::EnumBbsCSeq(WalkerBbs& x)
@@ -1569,7 +1569,7 @@ void NodeDB::EnumBbsCSeq(WalkerBbs& x)
 
 void NodeDB::EnumAllBbsCT(WalkerBbs& x)
 {
-	x.m_Rs.Reset(Query::BbsEnumAllCT, "SELECT " TblBbs_AllFieldsListed " FROM " TblBbs " ORDER BY " TblBbs_Channel " ASC," TblBbs_Time " ASC");
+	x.m_Rs.Reset(Query::BbsEnumAllCT, "SELECT " TblBbs_AllFieldsListed " FROM " TblBbs " ORDER BY " TblBbs_Channel " ASC," TblBbs_Height " ASC");
 }
 
 void NodeDB::EnumAllBbsSeq(WalkerBbs& x)
@@ -1605,7 +1605,7 @@ bool NodeDB::WalkerBbs::MoveNext()
 	m_Rs.get(0, m_ID);
 	m_Rs.get(1, m_Data.m_Key);
 	m_Rs.get(2, m_Data.m_Channel);
-	m_Rs.get(3, m_Data.m_TimePosted);
+	m_Rs.get(3, m_Data.m_HeightPosted);
 	m_Rs.get(4, m_Data.m_Message);
 	return true;
 }
@@ -1618,9 +1618,9 @@ bool NodeDB::BbsFind(WalkerBbs& x)
 	return x.MoveNext();
 }
 
-void NodeDB::BbsDelOld(Timestamp tMinToRemain)
+void NodeDB::BbsDelOld(Height tMinToRemain)
 {
-	Recordset rs(*this, Query::BbsDelOld, "DELETE FROM " TblBbs " WHERE " TblBbs_Time "<?");
+	Recordset rs(*this, Query::BbsDelOld, "DELETE FROM " TblBbs " WHERE " TblBbs_Height "<?");
 	rs.put(0, tMinToRemain);
 	rs.Step();
 }
@@ -1630,7 +1630,7 @@ uint64_t NodeDB::BbsIns(const WalkerBbs::Data& d)
 	Recordset rs(*this, Query::BbsIns, "INSERT INTO " TblBbs "(" TblBbs_InsFieldsListed ") VALUES(?,?,?,?)");
 	rs.put(0, d.m_Key);
 	rs.put(1, d.m_Channel);
-	rs.put(2, d.m_TimePosted);
+	rs.put(2, d.m_HeightPosted);
 	rs.put(3, d.m_Message);
 	rs.Step();
 	TestChanged1Row();
@@ -1638,9 +1638,9 @@ uint64_t NodeDB::BbsIns(const WalkerBbs::Data& d)
 	return sqlite3_last_insert_rowid(m_pDb);
 }
 
-uint64_t NodeDB::BbsFindCursor(BbsChannel ch, Timestamp t)
+uint64_t NodeDB::BbsFindCursor(BbsChannel ch, Height t)
 {
-	Recordset rs(*this, Query::BbsFindCursor, "SELECT " TblBbs_ID " FROM " TblBbs " WHERE " TblBbs_Channel "=? AND " TblBbs_Time ">=? ORDER BY " TblBbs_Time);
+	Recordset rs(*this, Query::BbsFindCursor, "SELECT " TblBbs_ID " FROM " TblBbs " WHERE " TblBbs_Channel "=? AND " TblBbs_Height ">=? ORDER BY " TblBbs_Height);
 	rs.put(0, ch);
 	rs.put(1, t);
 

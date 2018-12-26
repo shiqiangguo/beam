@@ -317,7 +317,7 @@ public:
 		struct Data {
 			ECC::Hash::Value m_Key;
 			BbsChannel m_Channel;
-			Timestamp m_TimePosted;
+			Timestamp m_HeightPosted;
 			Blob m_Message;
 		} m_Data;
 
@@ -330,8 +330,8 @@ public:
 	void EnumAllBbsSeq(WalkerBbs&); // ordered by m_ID. Must be initialized to specify the lower bound
 	uint64_t BbsIns(const WalkerBbs::Data&); // must be unique (if not sure - first try to find it). Returns the ID
 	bool BbsFind(WalkerBbs&); // set Key
-	void BbsDelOld(Timestamp tMinToRemain);
-	uint64_t BbsFindCursor(BbsChannel, Timestamp);
+	void BbsDelOld(Height tMinToRemain);
+	uint64_t BbsFindCursor(BbsChannel, Height);
 	uint64_t get_BbsLastID();
 
 	void InsertDummy(Height h, uint64_t);

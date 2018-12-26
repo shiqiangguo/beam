@@ -233,7 +233,7 @@ void FlyClient::NetworkStd::Connection::OnMsg(Login&& msg)
         for (BbsSubscriptions::const_iterator it = m_This.m_BbsSubscriptions.begin(); m_This.m_BbsSubscriptions.end() != it; it++)
         {
             proto::BbsSubscribe msgOut;
-            msgOut.m_TimeFrom = it->second.second;
+            msgOut.m_HeightFrom = it->second.second;
             msgOut.m_Channel = it->first;
             msgOut.m_On = true;
             Send(msgOut);
@@ -756,7 +756,7 @@ bool FlyClient::NetworkStd::Connection::IsSupported(RequestBbsMsg& req)
 
 void FlyClient::NetworkStd::Connection::SendRequest(RequestBbsMsg& req)
 {
-    req.m_Msg.m_TimePosted = getTimestamp();
+    req.m_Msg.m_HeightPosted = m_Tip.m_Height;
     Send(req.m_Msg);
 
     Ping msg2(Zero);
@@ -789,7 +789,7 @@ void FlyClient::NetworkStd::Connection::OnFirstRequestDone(bool bStillSupported)
         m_lst.Delete(n); // aborted already
 }
 
-void FlyClient::NetworkStd::BbsSubscribe(BbsChannel ch, Timestamp ts, IBbsReceiver* p)
+void FlyClient::NetworkStd::BbsSubscribe(BbsChannel ch, Height ts, IBbsReceiver* p)
 {
     BbsSubscriptions::iterator it = m_BbsSubscriptions.find(ch);
     if (m_BbsSubscriptions.end() == it)
@@ -812,7 +812,7 @@ void FlyClient::NetworkStd::BbsSubscribe(BbsChannel ch, Timestamp ts, IBbsReceiv
     }
 
     proto::BbsSubscribe msg;
-    msg.m_TimeFrom = ts;
+    msg.m_HeightFrom = ts;
     msg.m_Channel = ch;
     msg.m_On = (NULL != p);
 
@@ -826,7 +826,7 @@ void FlyClient::NetworkStd::Connection::OnMsg(BbsMsg&& msg)
     BbsSubscriptions::iterator it = m_This.m_BbsSubscriptions.find(msg.m_Channel);
     if (m_This.m_BbsSubscriptions.end() != it)
     {
-        it->second.second = msg.m_TimePosted;
+        it->second.second = msg.m_HeightPosted;
 
         assert(it->second.first);
         it->second.first->OnMsg(std::move(msg));

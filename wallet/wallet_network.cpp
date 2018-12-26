@@ -196,9 +196,9 @@ namespace beam {
 
 		auto itBbs = m_BbsTimestamps.find(msg.m_Channel);
 		if (m_BbsTimestamps.end() != itBbs)
-			itBbs->second = std::max(itBbs->second, msg.m_TimePosted);
+			itBbs->second = std::max(itBbs->second, msg.m_HeightPosted);
 		else
-			m_BbsTimestamps[msg.m_Channel] = msg.m_TimePosted;
+			m_BbsTimestamps[msg.m_Channel] = msg.m_HeightPosted;
 
 		if (!m_pTimerBbsTmSave)
 		{
@@ -264,7 +264,7 @@ namespace beam {
 		if (proto::Bbs::Encrypt(pReq->m_Msg.m_Message, peerID.m_Pk, nonce, sb.first, static_cast<uint32_t>(sb.second)))
 		{
 			pReq->m_Msg.m_Channel = channel_from_wallet_id(peerID);
-			pReq->m_Msg.m_TimePosted = getTimestamp();
+            pReq->m_Msg.m_HeightPosted = m_WalletDB->getCurrentHeight();
 
 			m_PendingBbsMsgs.push_back(*pReq);
 			pReq->AddRef();

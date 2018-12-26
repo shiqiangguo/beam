@@ -857,8 +857,12 @@ void Node::InitMode()
 
 void Node::Bbs::Cleanup()
 {
-    get_ParentObj().m_Processor.get_DB().BbsDelOld(getTimestamp() - get_ParentObj().m_Cfg.m_Timeout.m_BbsMessageTimeout_s);
-    m_LastCleanup_ms = GetTime_ms();
+    Height currentHeight = get_ParentObj().m_Processor.m_Cursor.m_Full.m_Height;
+    if (currentHeight > get_ParentObj().m_Cfg.m_Timeout.m_BbsMessageTimeout_b)
+    {
+        get_ParentObj().m_Processor.get_DB().BbsDelOld(currentHeight - get_ParentObj().m_Cfg.m_Timeout.m_BbsMessageTimeout_b);
+    }
+    m_LastCleanup_b = currentHeight;
 
     FindRecommendedChannel();
 }
@@ -907,8 +911,8 @@ void Node::Bbs::FindRecommendedChannel()
 
 void Node::Bbs::MaybeCleanup()
 {
-    uint32_t dt_ms = GetTime_ms() - m_LastCleanup_ms;
-    if (dt_ms >= get_ParentObj().m_Cfg.m_Timeout.m_BbsCleanupPeriod_ms)
+    uint64_t dt_b = get_ParentObj().m_Processor.m_Cursor.m_Full.m_Height - m_LastCleanup_b;
+    if (dt_b >= get_ParentObj().m_Cfg.m_Timeout.m_BbsCleanupPeriod_b)
         Cleanup();
 }
 
@@ -2718,18 +2722,18 @@ void Node::Peer::OnMsg(proto::BbsMsg&& msg)
 	if (msg.m_Message.size() > proto::Bbs::s_MaxMsgSize)
 		ThrowUnexpected("Bbs msg too large"); // will also ban this peer
 
-    Timestamp t = getTimestamp();
-    Timestamp t0 = t - m_This.m_Cfg.m_Timeout.m_BbsMessageTimeout_s;
-    Timestamp t1 = t + m_This.m_Cfg.m_Timeout.m_BbsMessageMaxAhead_s;
+    Height t = m_This.m_Processor.m_Cursor.m_Full.m_Height;
+    Timestamp t0 = t > m_This.m_Cfg.m_Timeout.m_BbsMessageTimeout_b ? t - m_This.m_Cfg.m_Timeout.m_BbsMessageTimeout_b : 0;
+    Timestamp t1 = t + m_This.m_Cfg.m_Timeout.m_BbsMessageMaxAhead_b;
 
-    if ((msg.m_TimePosted <= t0) || (msg.m_TimePosted > t1))
+    if ((msg.m_HeightPosted <= t0) || (msg.m_HeightPosted > t1))
         return;
 
     NodeDB& db = m_This.m_Processor.get_DB();
     NodeDB::WalkerBbs wlk(db);
 
     wlk.m_Data.m_Channel = msg.m_Channel;
-    wlk.m_Data.m_TimePosted = msg.m_TimePosted;
+    wlk.m_Data.m_HeightPosted = msg.m_HeightPosted;
     wlk.m_Data.m_Message = Blob(msg.m_Message);
 
     Bbs::CalcMsgKey(wlk.m_Data);
@@ -2819,7 +2823,7 @@ void Node::Peer::SendBbsMsg(const NodeDB::WalkerBbs::Data& d)
 {
     proto::BbsMsg msgOut;
     msgOut.m_Channel = d.m_Channel;
-    msgOut.m_TimePosted = d.m_TimePosted;
+    msgOut.m_HeightPosted = d.m_HeightPosted;
     d.m_Message.Export(msgOut.m_Message); // TODO: avoid buf allocation
 
     Send(msgOut);
@@ -2847,7 +2851,7 @@ void Node::Peer::OnMsg(proto::BbsSubscribe&& msg)
         m_This.m_Bbs.m_Subscribed.insert(pS->m_Bbs);
         m_Subscriptions.insert(pS->m_Peer);
 
-		pS->m_Cursor = m_This.m_Processor.get_DB().BbsFindCursor(msg.m_Channel, msg.m_TimeFrom) - 1;
+		pS->m_Cursor = m_This.m_Processor.get_DB().BbsFindCursor(msg.m_Channel, msg.m_HeightFrom) - 1;
 
 		BroadcastBbs(*pS);
     }
