@@ -66,6 +66,7 @@ namespace {
     DEF_LABEL(difficulty);
     DEF_LABEL(nonce);
     DEF_LABEL(output);
+    DEF_LABEL(height);
 #undef DEF_LABEL
 
 ResultCode parse_json(const void* buf, size_t bufSize, json& o) {
@@ -154,6 +155,7 @@ bool append_json_msg(io::FragmentWriter& packer, const Job& m) {
     append_base(o, m);
     o[l_input] = m.input;
     o[l_difficulty] = m.difficulty;
+    o[l_height] = m.height;
     return serialize_json_msg(packer, o);
 }
 
