@@ -58,8 +58,7 @@ namespace beam
         case Coin::Spent: ss << "Spent"; break;
         case Coin::Maturing: ss << "Maturing"; break;
         case Coin::Outgoing: ss << "In progress(outgoing)"; break;
-        case Coin::Incoming: ss << "In progress(incoming)"; break;
-        case Coin::Change: ss << "In progress(change)"; break;
+        case Coin::Incoming: ss << "In progress(incoming/change)"; break;
         default:
             assert(false && "Unknown coin status");
         }
@@ -103,10 +102,21 @@ namespace
         cout << options << std::endl;
     }
 
+    void changeAddressExpiration(const IWalletDB::Ptr& walletDB, const string& address)
+    {
+        WalletID walletID(Zero);
+
+        if (address != "*")
+        {
+            walletID.FromHex(address);
+        }
+
+        wallet::changeAddressExpiration(walletDB, walletID);
+    }
+
     WalletAddress newAddress(
         const IWalletDB::Ptr& walletDB,
         const std::string& label,
-        const SecString& pass,
         bool isNever = false
     )
     {
@@ -154,7 +164,7 @@ namespace
             auto tempPhrase = vm[cli::SEED_PHRASE].as<string>();
             phrase = string_helpers::split(tempPhrase, ';');
             assert(phrase.size() == 12);
-            if (phrase.size() != 12)
+            if (!isValidMnemonic(phrase, language::en))
             {
                 LOG_ERROR() << "Invalid seed phrases provided: " << tempPhrase;
                 return false;
@@ -410,6 +420,65 @@ int HandleTreasury(const po::variables_map& vm, Key::IKdf& kdf)
     return 0;
 }
 
+struct PaymentInfo
+{
+	WalletID m_Sender;
+	WalletID m_Receiver;
+
+	Amount m_Amount;
+	Merkle::Hash m_KernelID;
+	Signature m_Signature;
+
+	template <typename Archive>
+	static void serializeWid(Archive& ar, WalletID& wid)
+	{
+		BbsChannel ch;
+		wid.m_Channel.Export(ch);
+
+		ar
+			& ch
+			& wid.m_Pk;
+
+		wid.m_Channel = ch;
+	}
+
+	template <typename Archive>
+	void serialize(Archive& ar)
+	{
+		serializeWid(ar, m_Sender);
+		serializeWid(ar, m_Receiver);
+		ar
+			& m_Amount
+			& m_KernelID
+			& m_Signature;
+	}
+
+	bool IsValid() const
+	{
+		wallet::PaymentConfirmation pc;
+		pc.m_Value = m_Amount;
+		pc.m_KernelID = m_KernelID;
+		pc.m_Signature = m_Signature;
+		pc.m_Sender = m_Sender.m_Pk;
+		return pc.IsValid(m_Receiver.m_Pk);
+	}
+
+	std::string to_string() const
+	{
+		char szKernelID[Merkle::Hash::nTxtLen + 1];
+		m_KernelID.Print(szKernelID);
+
+		std::ostringstream s;
+		s
+			<< "Sender: " << std::to_string(m_Sender) << std::endl
+			<< "Receiver: " << std::to_string(m_Receiver) << std::endl
+			<< "Amount: " << PrintableAmount(m_Amount) << std::endl
+			<< "KernelID: " << szKernelID << std::endl;
+
+		return s.str();
+	}
+};
+
 
 io::Reactor::Ptr reactor;
 
@@ -496,7 +565,10 @@ int main_impl(int argc, char* argv[])
                             && command != cli::EXPORT_OWNER_KEY
                             && command != cli::NEW_ADDRESS
                             && command != cli::CANCEL_TX
-                            && command != cli::GENERATE_PHRASE)
+                            && command != cli::CHANGE_ADDRESS_EXPIRATION
+							&& command != cli::PAYMENT_PROOF_EXPORT
+							&& command != cli::PAYMENT_PROOF_VERIFY
+							&& command != cli::GENERATE_PHRASE)
                         {
                             LOG_ERROR() << "unknown command: \'" << command << "\'";
                             return -1;
@@ -548,7 +620,7 @@ int main_impl(int argc, char* argv[])
                                 LOG_INFO() << "wallet successfully created...";
 
                                 // generate default address
-                                newAddress(walletDB, "default", pass);
+                                newAddress(walletDB, "default");
 
                                 return 0;
                             }
@@ -564,6 +636,14 @@ int main_impl(int argc, char* argv[])
                         {
                             LOG_ERROR() << "Wallet data unreadable, restore wallet.db from latest backup or delete it and reinitialize the wallet";
                             return -1;
+                        }
+
+                        if (command == cli::CHANGE_ADDRESS_EXPIRATION)
+                        {
+                            string address = vm[cli::WALLET_ADDR].as<string>();
+
+                            changeAddressExpiration(walletDB, address);
+                            return 0;
                         }
 
                         if (command == cli::EXPORT_MINER_KEY)
@@ -608,7 +688,7 @@ int main_impl(int argc, char* argv[])
                         if (command == cli::NEW_ADDRESS)
                         {
                             auto label = vm[cli::NEW_ADDRESS_LABEL].as<string>();
-                            newAddress(walletDB, label, pass, vm[cli::EXPIRATION_TIME].as<string>() == "never");
+                            newAddress(walletDB, label, vm[cli::EXPIRATION_TIME].as<string>() == "never");
 
                             if (!vm.count(cli::LISTEN)) 
                             {
@@ -626,7 +706,7 @@ int main_impl(int argc, char* argv[])
                             Block::SystemState::ID stateID = {};
                             walletDB->getSystemStateID(stateID);
                             auto totalInProgress = walletDB->getTotal(Coin::Incoming) +
-                                walletDB->getTotal(Coin::Outgoing) + walletDB->getTotal(Coin::Change);
+                                walletDB->getTotal(Coin::Outgoing);
                             auto totalCoinbase = walletDB->getTotalByType(Coin::Available, Key::Type::Coinbase) +
                                 walletDB->getTotalByType(Coin::Maturing, Key::Type::Coinbase);
                             auto totalFee = walletDB->getTotalByType(Coin::Available, Key::Type::Comission) +
@@ -685,6 +765,66 @@ int main_impl(int argc, char* argv[])
                             });
                             return 0;
                         }
+
+						if (command == cli::PAYMENT_PROOF_EXPORT)
+						{
+							auto txIdVec = from_hex(vm[cli::TX_ID].as<string>());
+							TxID txId;
+							if (txIdVec.size() >= 16)
+								std::copy_n(txIdVec.begin(), 16, txId.begin());
+
+							PaymentInfo pi;
+							uint64_t nAddrOwnID;
+
+							bool bSuccess =
+								wallet::getTxParameter(walletDB, txId, wallet::TxParameterID::PeerID, pi.m_Receiver) &&
+								wallet::getTxParameter(walletDB, txId, wallet::TxParameterID::MyID, pi.m_Sender) &&
+								wallet::getTxParameter(walletDB, txId, wallet::TxParameterID::KernelID, pi.m_KernelID) &&
+								wallet::getTxParameter(walletDB, txId, wallet::TxParameterID::Amount, pi.m_Amount) &&
+								wallet::getTxParameter(walletDB, txId, wallet::TxParameterID::PaymentConfirmation, pi.m_Signature) &&
+								wallet::getTxParameter(walletDB, txId, wallet::TxParameterID::MyAddressID, nAddrOwnID);
+
+							if (bSuccess)
+							{
+								LOG_INFO() << "Payment tx details:\n" << pi.to_string();
+								LOG_INFO() << "Sender address own ID: " << nAddrOwnID;
+
+								Serializer ser;
+								ser & pi;
+
+								auto res = ser.buffer();
+								std::string sTxt;
+								sTxt.resize(res.second * 2);
+
+								beam::to_hex(&sTxt.front(), res.first, res.second);
+								LOG_INFO() << "Exported form: " << sTxt;
+
+							}
+							else
+							{
+								LOG_WARNING() << "No payment confirmation for the specified transaction.";
+							}
+
+							return 0;
+						}
+
+						if (command == cli::PAYMENT_PROOF_VERIFY)
+						{
+							ByteBuffer buf = from_hex(vm[cli::PAYMENT_PROOF_DATA].as<string>());
+
+							Deserializer der;
+							der.reset(buf);
+
+							PaymentInfo pi;
+							der & pi;
+
+							if (!pi.IsValid())
+								throw std::runtime_error("Payment proof is invalid");
+
+							LOG_INFO() << "Payment tx details:\n" << pi.to_string() << "Verified.";
+
+							return 0;
+						}
 
                         if (vm.count(cli::NODE_ADDR) == 0)
                         {
@@ -753,9 +893,14 @@ int main_impl(int argc, char* argv[])
 
                         if (isTxInitiator)
                         {
-                            WalletAddress senderAddress = newAddress(walletDB, "", pass);
+                            WalletAddress senderAddress = newAddress(walletDB, "");
                             wnet.AddOwnAddress(senderAddress);
-                            wallet.transfer_money(senderAddress.m_walletID, receiverWalletID, move(amount), move(fee), command == cli::SEND);
+                            auto txId = wallet.transfer_money(senderAddress.m_walletID, receiverWalletID, move(amount), move(fee), command == cli::SEND);
+
+                            if (!txId)
+                            {
+                                return 0;
+                            }
                         }
 
                         if (command == cli::CANCEL_TX) 
@@ -763,7 +908,23 @@ int main_impl(int argc, char* argv[])
                             auto txIdVec = from_hex(vm[cli::TX_ID].as<string>());
                             TxID txId;
                             std::copy_n(txIdVec.begin(), 16, txId.begin());
-                            wallet.cancel_tx(txId);
+                            auto tx = walletDB->getTx(txId);
+
+                            if (tx)
+                            {
+                                if (tx->canCancel())
+                                {
+                                    wallet.cancel_tx(txId);
+                                }
+                                else
+                                {
+                                    LOG_ERROR() << "Transaction could not be cancelled. Invalid transaction status.";
+                                }
+                            }
+                            else
+                            {
+                                LOG_ERROR() << "Unknown transaction ID.";
+                            }
                         }
 
                         io::Reactor::get_Current().run();

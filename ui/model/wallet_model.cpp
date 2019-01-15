@@ -174,6 +174,14 @@ struct WalletModelBridge : public Bridge<IWalletModelAsync>
         });
     }
 
+    void saveAddressChanges(const beam::WalletID& id, const std::string& name, bool isNever, bool makeActive, bool makeExpired) override
+    {
+        tx.send([id, name, isNever, makeActive, makeExpired](BridgeInterface& receiver_) mutable
+        {
+            receiver_.saveAddressChanges(id, name, isNever, makeActive, makeExpired);
+        });
+    }
+
     void setNodeAddress(const std::string& addr) override
     {
         tx.send([addr](BridgeInterface& receiver_) mutable
@@ -241,7 +249,7 @@ WalletStatus WalletModel::getStatus() const
     WalletStatus status;
 
     status.available = _walletDB->getAvailable();
-    status.receiving = _walletDB->getTotal(Coin::Incoming) + _walletDB->getTotal(Coin::Change);
+    status.receiving = _walletDB->getTotal(Coin::Incoming);
     status.sending = _walletDB->getTotal(Coin::Outgoing);
     status.maturing = _walletDB->getTotal(Coin::Maturing);
 
@@ -408,6 +416,26 @@ void WalletModel::sendMoney(const beam::WalletID& receiver, const std::string& c
 {
     try
     {
+        auto receiverAddr = _walletDB->getAddress(receiver);
+
+        if (receiverAddr)
+        {
+            if (receiverAddr->isExpired())
+            {
+                emit cantSendToExpired();
+                return;
+            }
+        }
+        else
+        {
+            WalletAddress peerAddr;
+            peerAddr.m_walletID = receiver;
+            peerAddr.m_createTime = getTimestamp();
+            peerAddr.m_label = comment;
+
+            saveAddress(peerAddr, false);
+        }
+
         WalletAddress senderAddress = wallet::createAddress(_walletDB);
         senderAddress.m_label = comment;
         saveAddress(senderAddress, true); // should update the wallet_network
@@ -420,6 +448,8 @@ void WalletModel::sendMoney(const beam::WalletID& receiver, const std::string& c
         {
             s->transfer_money(senderAddress.m_walletID, receiver, move(amount), move(fee), true, 120, move(message));
         }
+
+        emit sendMoneyVerified();
     }
     catch (...)
     {
@@ -538,6 +568,56 @@ void WalletModel::deleteAddress(const beam::WalletID& id)
                 }
             }
             _walletDB->deleteAddress(id);
+        }
+    }
+    catch (...)
+    {
+    }
+}
+
+void WalletModel::saveAddressChanges(const beam::WalletID& id, const std::string& name, bool isNever, bool makeActive, bool makeExpired)
+{
+    try
+    {
+        auto addr = _walletDB->getAddress(id);
+
+        if (addr)
+        {
+            if (addr->m_OwnID)
+            {
+                addr->m_label = name;
+                if (makeExpired)
+                {
+                    assert(addr->m_createTime < getTimestamp() - 1);
+                    addr->m_duration = getTimestamp() - addr->m_createTime - 1;
+                }
+                else if (isNever)
+                {
+                    addr->m_duration = 0;
+                }
+                else if (addr->m_duration == 0 || makeActive)
+                {
+                    // set expiration date to 24h since now
+                    addr->m_createTime = getTimestamp();
+                    addr->m_duration = 24 * 60 * 60; //24h
+                }  
+
+                _walletDB->saveAddress(*addr);
+
+                auto s = _walletNetwork.lock();
+                if (s)
+                {
+                    static_pointer_cast<WalletNetworkViaBbs>(s)->AddOwnAddress(*addr);
+                }
+            }
+            else
+            {
+                LOG_ERROR() << "It's not implemented!";
+            }
+        }
+        else
+        {
+            LOG_ERROR() << "Address " << to_string(id) << " is absent.";
         }
     }
     catch (...)
