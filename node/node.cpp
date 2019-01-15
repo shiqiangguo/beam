@@ -3477,6 +3477,7 @@ void Node::Miner::OnMinedExternal()
 {
 	std::string jobID_;
 	Block::PoW POW;
+    Block::SystemState::ID nullID;
 
 	assert(m_External.m_pSolver);
 	m_External.m_pSolver->get_last_found_block(jobID_, POW);
@@ -3493,6 +3494,7 @@ void Node::Miner::OnMinedExternal()
     if (bReject)
     {
         LOG_INFO() << "Solution is rejected due it is outdated.";
+        m_External.m_pSolver->solution_result(jobID_, false, nullID);
 		return; // outdated
     }
 
@@ -3501,6 +3503,7 @@ void Node::Miner::OnMinedExternal()
     if (!pTask || *pTask->m_pStop)
     {
         LOG_INFO() << "Solution is rejected due block mining has been canceled.";
+        m_External.m_pSolver->solution_result(jobID_, false, nullID);
 		return; // already cancelled
     }
 
@@ -3510,6 +3513,7 @@ void Node::Miner::OnMinedExternal()
     if (!pTask->m_Hdr.IsValidPoW())
     {
         LOG_INFO() << "invalid solution from external miner";
+        m_External.m_pSolver->solution_result(jobID_, false, nullID);
         return;
     }
 
@@ -3520,11 +3524,19 @@ void Node::Miner::OnMinedExternal()
 
 void Node::Miner::OnMined()
 {
+    std::string jobID_;
+	Block::PoW POW;
+
+	assert(m_External.m_pSolver);
+	m_External.m_pSolver->get_last_found_block(jobID_, POW);
     Task::Ptr pTask;
     {
         std::scoped_lock<std::mutex> scope(m_Mutex);
-        if (!(m_pTask && *m_pTask->m_pStop))
+        if (!(m_pTask && *m_pTask->m_pStop)){
+            Block::SystemState::ID nullID;
+            m_External.m_pSolver->solution_result(jobID_, false, nullID);
             return; //?!
+        }
         pTask.swap(m_pTask);
     }
 
@@ -3540,11 +3552,13 @@ void Node::Miner::OnMined()
     case NodeProcessor::DataStatus::Invalid:
         // Some bug?
         LOG_WARNING() << "Mined block rejected as invalid!";
+        m_External.m_pSolver->solution_result(jobID_, false, id);
         return;
 
     case NodeProcessor::DataStatus::Rejected:
         // Someone else mined exactly the same block!
         LOG_WARNING() << "Mined block duplicated";
+        m_External.m_pSolver->solution_result(jobID_, false, id);
         return;
 
     case NodeProcessor::DataStatus::Accepted:
@@ -3554,6 +3568,8 @@ void Node::Miner::OnMined()
 
     eStatus = get_ParentObj().m_Processor.OnBlock(id, pTask->m_BodyP, pTask->m_BodyE, get_ParentObj().m_MyPublicID); // will likely trigger OnNewState(), and spread this block to the network
     assert(NodeProcessor::DataStatus::Accepted == eStatus);
+    
+    m_External.m_pSolver->solution_result(jobID_, true, id);
 
     get_ParentObj().m_Processor.FlushDB();
 }

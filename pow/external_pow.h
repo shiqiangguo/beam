@@ -47,6 +47,9 @@ public:
         const BlockFound& callback,
         const CancelCallback& cancelCallback) = 0;
 
+    virtual void solution_result(const std::string& jobID, 
+        bool accepted, const beam::Block::SystemState::ID& blockId){};
+
     virtual void get_last_found_block(std::string& jobID, Block::PoW& pow) = 0;
 
     virtual void stop_current() = 0;

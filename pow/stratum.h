@@ -136,6 +136,16 @@ struct Result : Message {
     {}
 };
 
+struct SolutionResult : Result {
+    std::string hash;
+    Height height;
+    SolutionResult(std::string _id, ResultCode _code, std::string _hash, Height _height) :
+        Result(_id, _code),
+        hash(_hash),
+        height(_height)
+    {}
+};
+
 struct ParserCallback {
     virtual ~ParserCallback() = default;
 

@@ -96,6 +96,10 @@ private:
         const CancelCallback& cancelCallback
     ) override;
 
+    void solution_result(const std::string& jobID, 
+        bool accepted, const beam::Block::SystemState::ID& blockId) override;
+
+
     void get_last_found_block(std::string& jobID, Block::PoW& pow) override;
     void stop_current() override;
     void stop() override;
@@ -118,6 +122,7 @@ private:
 		std::string id;
 		Block::PoW pow;
 		BlockFound onBlockFound;
+        uint64_t resultFrom;
 	} _recentResult;
 
     io::SerializedMsg _currentMsg;
