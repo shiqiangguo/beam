@@ -88,7 +88,7 @@
 #define TX_PARAMS_FIELDS ENUM_TX_PARAMS_FIELDS(LIST, COMMA, )
 
 #define TblStates            "States"
-#define TblStates_Height    "Height"
+#define TblStates_Height     "Height"
 #define TblStates_Hdr        "State"
 
 namespace std
@@ -112,9 +112,6 @@ namespace beam
 
     namespace
     {
-        static const char g_szBbsTime[] = "Bbs-Channel-Upd";
-        static const char g_szBbsChannel[] = "Bbs-Channel";
-
         void throwIfError(int res, sqlite3* db)
         {
             if (res == SQLITE_OK)
@@ -884,8 +881,9 @@ namespace beam
         const char* SystemStateIDName = "SystemStateID";
         const char* LastUpdateTimeName = "LastUpdateTime";
         const int BusyTimeoutMs = 1000;
-        const int DbVersion = 10;
-    }
+        const int DbVersion = 11;
+		const int DbVersion10 = 10;
+	}
 
     Coin::Coin(Amount amount, Status status, Height maturity, Key::Type keyType, Height confirmHeight, Height lockedHeight)
         : m_status{ status }
@@ -1015,11 +1013,38 @@ namespace beam
                 }
                 {
                     int version = 0;
-                    if (!wallet::getVar(walletDB, Version, version) || version > DbVersion)
-                    {
-                        LOG_DEBUG() << "Invalid DB version: " << version << ". Expected: " << DbVersion;
-                        return Ptr();
-                    }
+					wallet::getVar(walletDB, Version, version);
+
+					switch (version)
+					{
+					case DbVersion10:
+						{
+							LOG_INFO() << "Converting DB to a newer format";
+
+							// get rid of former Coin::Change status
+							const char* req = "UPDATE " STORAGE_NAME " SET status=?1 WHERE status=?2;";
+							sqlite::Statement stm(walletDB->_db, req);
+
+							stm.bind(1, Coin::Incoming);
+							stm.bind(2, Coin::ChangeV0);
+
+							stm.step();
+						}
+
+						wallet::setVar(walletDB, Version, DbVersion);
+
+						// no break;
+
+					case DbVersion:
+						break; // ok
+
+					default:
+						{
+							LOG_DEBUG() << "Invalid DB version: " << version << ". Expected: " << DbVersion;
+							return Ptr();
+						}
+					}
+
                 }
                 {
                     const char* req = "SELECT name FROM sqlite_master WHERE type='table' AND name='" STORAGE_NAME "';";
@@ -1482,7 +1507,46 @@ namespace beam
         sqlite::Transaction trans(_db);
 
         {
-            const char* req = "UPDATE " STORAGE_NAME " SET status=?1, confirmHeight=?2, lockedHeight=?2 WHERE confirmHeight > ?3 ;";
+            // rollback utxos which belongs to transactions
+            vector<TxID> rollbackedTransaction;
+            {
+                const char* req = "SELECT * FROM " TX_PARAMS_NAME " WHERE paramID = ?1 ;";
+                sqlite::Statement stm(_db, req);
+                stm.bind(1, wallet::TxParameterID::KernelProofHeight);
+                while (stm.step())
+                {
+                    TxID& txID = rollbackedTransaction.emplace_back();
+                    stm.get(0, txID);
+                }
+            }
+            auto thisPtr = shared_from_this();
+            for (auto& tx : rollbackedTransaction)
+            {
+                wallet::setTxParameter(thisPtr, tx, wallet::TxParameterID::Status, TxStatus::Registering, true);
+                wallet::setTxParameter(thisPtr, tx, wallet::TxParameterID::KernelProofHeight, Height(0), false);
+
+                {
+                    const char* req = "UPDATE " STORAGE_NAME " SET status=?1 WHERE spentTxId = ?2 ;";
+                    sqlite::Statement stm(_db, req);
+                    stm.bind(1, Coin::Outgoing);
+                    stm.bind(2, tx);
+                    stm.step();
+                }
+
+                {
+                    const char* req = "UPDATE " STORAGE_NAME " SET status=?1, confirmHeight=?2 WHERE createTxId = ?3 ;";
+                    sqlite::Statement stm(_db, req);
+                    stm.bind(1, Coin::Incoming);
+                    stm.bind(2, MaxHeight);
+                    stm.bind(3, tx);
+                    stm.step();
+                }
+            }
+        }
+
+        // rollback restored utxos or coinbase
+        {
+            const char* req = "UPDATE " STORAGE_NAME " SET status=?1, confirmHeight=?2, lockedHeight=?2 WHERE confirmHeight > ?3 AND createTxId IS NULL ;";
             sqlite::Statement stm(_db, req);
             stm.bind(1, Coin::Unavailable);
             stm.bind(2, MaxHeight);
@@ -1491,7 +1555,7 @@ namespace beam
         }
 
         {
-            const char* req = "UPDATE " STORAGE_NAME " SET status=?1, lockedHeight=?2 WHERE lockedHeight > ?3 AND confirmHeight <= ?3 ;";
+            const char* req = "UPDATE " STORAGE_NAME " SET status=?1, lockedHeight=?2 WHERE lockedHeight > ?3 AND confirmHeight <= ?3 AND spentTxId IS NULL ;";
             sqlite::Statement stm(_db, req);
             stm.bind(1, Coin::Available);
             stm.bind(2, MaxHeight);
@@ -1533,6 +1597,7 @@ namespace beam
                     res.emplace_back(*t);
                 }
             }
+            sort(res.begin(), res.end(), [](const auto& left, const auto& right) {return left.m_createTime > right.m_createTime; });
         }
 
         return res;
@@ -1664,10 +1729,11 @@ namespace beam
             stm.step();
         }
         {
-            const char* req = "DELETE FROM " STORAGE_NAME " WHERE createTxId=?1;";
+            const char* req = "DELETE FROM " STORAGE_NAME " WHERE createTxId=?1 AND status=?2;";
             sqlite::Statement stm(_db, req);
             stm.bind(1, txId);
-            stm.step();
+			stm.bind(2, Coin::Incoming);
+			stm.step();
         }
         trans.commit();
         notifyCoinsChanged();
@@ -1703,12 +1769,14 @@ namespace beam
 
             if (stm2.step())
             {
-                const char* updateReq = "UPDATE " ADDRESSES_NAME " SET label=?2, category=?3 WHERE walletID=?1;";
+                const char* updateReq = "UPDATE " ADDRESSES_NAME " SET label=?2, category=?3, duration=?4, createTime=?5 WHERE walletID=?1;";
                 sqlite::Statement stm(_db, updateReq);
 
                 stm.bind(1, address.m_walletID);
                 stm.bind(2, address.m_label);
                 stm.bind(3, address.m_category);
+                stm.bind(4, address.m_duration);
+                stm.bind(5, address.m_createTime);
                 stm.step();
             }
             else
@@ -1723,6 +1791,25 @@ namespace beam
 
         trans.commit();
 
+        notifyAddressChanged();
+    }
+
+    void WalletDB::setNeverExpirationForAll()
+    {
+        sqlite::Transaction trans(_db);
+
+        {
+            const char* updateReq = "UPDATE " ADDRESSES_NAME " SET duration = ?1 WHERE OwnID != 0;";
+            sqlite::Statement stm(_db, updateReq);
+
+            stm.bind(1, 0);
+
+            stm.step();
+        }
+
+        trans.commit();
+
+        LOG_INFO() << "Expiration for all addresses  was updated to \"never\".";
         notifyAddressChanged();
     }
 
@@ -1755,24 +1842,6 @@ namespace beam
         notifyAddressChanged();
     }
 
-    Timestamp WalletDB::GetLastChannel(BbsChannel& ch)
-    {
-        Timestamp t;
-        auto thisPtr = shared_from_this();
-        bool b =
-            wallet::getVar(thisPtr, g_szBbsTime, t) &&
-            wallet::getVar(thisPtr, g_szBbsChannel, ch);
-
-            return b ? t : 0;
-    }
-
-    void WalletDB::SetLastChannel(BbsChannel ch)
-    {
-        auto thisPtr = shared_from_this();
-
-        wallet::setVar(thisPtr, g_szBbsChannel, ch);
-        wallet::setVar(thisPtr, g_szBbsTime, getTimestamp());
-    }
 
     void WalletDB::subscribe(IWalletDbObserver* observer)
     {
@@ -2074,6 +2143,8 @@ namespace beam
 
     namespace wallet
     {
+		const char g_szPaymentProofRequired[] = "payment_proof_required";
+
         bool getTxParameter(IWalletDB::Ptr db, const TxID& txID, TxParameterID paramID, ECC::Point::Native& value)
         {
             ECC::Point pt;
@@ -2142,6 +2213,29 @@ namespace beam
             return toByteBuffer(s);
         }
 
+        void changeAddressExpiration(beam::IWalletDB::Ptr walletDB, const WalletID& walletID)
+        {
+            if (walletID != Zero)
+            {
+                auto walletAddress = walletDB->getAddress(walletID);
+
+                if (!walletAddress.is_initialized())
+                {
+                    LOG_INFO() << "Address " << to_string(walletID) << "is absent in wallet";
+                    return;
+                }
+
+                walletAddress->m_duration = 0;
+
+                walletDB->saveAddress(*walletAddress);
+
+                LOG_INFO() << "Expiration for address " << to_string(walletID) << " was updated to \"never\".";
+                return;
+            }
+
+            walletDB->setNeverExpirationForAll();
+        }
+
         WalletAddress createAddress(beam::IWalletDB::Ptr walletDB)
         {
             WalletAddress newAddress;
@@ -2153,9 +2247,10 @@ namespace beam
 
             proto::Sk2Pk(newAddress.m_walletID.m_Pk, sk);
 
-            BbsChannel ch;
-            if (!walletDB->GetLastChannel(ch))
-                ch = (BbsChannel)newAddress.m_walletID.m_Pk.m_pData[0] >> 3; // fallback
+			// derive the channel from the address
+			BbsChannel ch;
+			newAddress.m_walletID.m_Pk.ExportWord<0>(ch);
+			ch %= proto::Bbs::s_MaxChannels;
 
             newAddress.m_walletID.m_Channel = ch;
             return newAddress;
