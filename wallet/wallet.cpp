@@ -283,6 +283,41 @@ namespace beam
         return txID;
     }
 
+    void Wallet::Refresh()
+    {
+        m_WalletDB->clear();
+        Block::SystemState::ID id;
+        ZeroObject(id);
+        m_WalletDB->setSystemStateID(id);
+
+        SetUtxoEventsHeight(0);
+        RequestUtxoEvents();
+        RefreshTransactions();
+    }
+
+    void Wallet::RefreshTransactions()
+    {
+        auto txs = m_WalletDB->getTxHistory();
+        for (auto& tx : txs)
+        {
+            if (m_Transactions.find(tx.m_txId) == m_Transactions.end())
+            {
+                auto t = constructTransaction(tx.m_txId, TxType::Simple);
+                if (t->SetParameter(TxParameterID::KernelProofHeight, Height(0), false)
+                    && t->SetParameter(TxParameterID::KernelUnconfirmedHeight, Height(0), false))
+                {
+                    m_Transactions.emplace(tx.m_txId, t);
+                }
+            }
+        }
+        auto t = m_Transactions;
+        for (auto& p : t)
+        {
+            auto tx = p.second;
+            tx->Update();
+        }
+    }
+
     void Wallet::ResumeTransaction(const TxDescription& tx)
     {
         if (tx.canResume() && m_Transactions.find(tx.m_txId) == m_Transactions.end())
@@ -501,17 +536,26 @@ namespace beam
 
     void Wallet::OnRequestComplete(MyRequestKernel& r)
     {
+        auto it = m_Transactions.find(r.m_TxID);
+        if (m_Transactions.end() == it)
+        {
+            return;
+        }
+        auto tx = it->second;
         if (!r.m_Res.m_Proof.empty())
         {
             m_WalletDB->get_History().AddStates(&r.m_Res.m_Proof.m_State, 1); // why not?
 
-            auto it = m_Transactions.find(r.m_TxID);
-            if (m_Transactions.end() != it)
+            if (tx->SetParameter(TxParameterID::KernelProofHeight, r.m_Res.m_Proof.m_State.m_Height))
             {
-                auto tx = it->second;
-                if (tx->SetParameter(TxParameterID::KernelProofHeight, r.m_Res.m_Proof.m_State.m_Height))
-                    tx->Update();
+                tx->Update();
             }
+        }
+        else
+        {
+            Block::SystemState::Full sTip;
+            get_tip(sTip);
+            tx->SetParameter(TxParameterID::KernelUnconfirmedHeight, sTip.m_Height);
         }
     }
 

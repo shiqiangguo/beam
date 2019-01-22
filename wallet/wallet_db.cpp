@@ -1367,12 +1367,6 @@ namespace beam
             stm.step();
             notifyCoinsChanged();
         }
-
-        {
-            sqlite::Statement stm(_db, "DELETE FROM " TX_PARAMS_NAME ";");
-            stm.step();
-            notifyTransactionChanged(ChangeAction::Reset, {});
-        }
     }
 
     bool WalletDB::find(Coin& coin)
@@ -1509,21 +1503,27 @@ namespace beam
         {
             // rollback utxos which belongs to transactions
             vector<TxID> rollbackedTransaction;
+            auto thisPtr = shared_from_this();
             {
                 const char* req = "SELECT * FROM " TX_PARAMS_NAME " WHERE paramID = ?1 ;";
                 sqlite::Statement stm(_db, req);
                 stm.bind(1, wallet::TxParameterID::KernelProofHeight);
                 while (stm.step())
                 {
-                    TxID& txID = rollbackedTransaction.emplace_back();
+                    TxID txID = { {0} };
                     stm.get(0, txID);
+                    Height kernelHeight = 0;
+                    if (wallet::getTxParameter(thisPtr, txID, wallet::TxParameterID::KernelProofHeight, kernelHeight) && kernelHeight > minHeight)
+                    {
+                        rollbackedTransaction.push_back(txID);
+                    }
                 }
             }
-            auto thisPtr = shared_from_this();
             for (auto& tx : rollbackedTransaction)
             {
                 wallet::setTxParameter(thisPtr, tx, wallet::TxParameterID::Status, TxStatus::Registering, true);
                 wallet::setTxParameter(thisPtr, tx, wallet::TxParameterID::KernelProofHeight, Height(0), false);
+                wallet::setTxParameter(thisPtr, tx, wallet::TxParameterID::KernelUnconfirmedHeight, Height(0), false);
 
                 {
                     const char* req = "UPDATE " STORAGE_NAME " SET status=?1 WHERE spentTxId = ?2 ;";
