@@ -1,12 +1,13 @@
-import QtQuick 2.3
+import QtQuick 2.11
 import QtQuick.Controls 2.4
 import QtQuick.Layouts 1.3
+import QtQuick.Window 2.2
 import "controls"
 import Beam.Wallet 1.0
 
-Item {
-    width: 1024
-    height: 768
+Window  {
+    width: Math.min(1024, Screen.desktopAvailableWidth - 10)
+    height: Math.min(768, Screen.desktopAvailableHeight - 80)
     property alias source: rootLoader.source
 
     SFFontLoader {}
@@ -57,7 +58,7 @@ Item {
                         Layout.minimumHeight: 20
                         Layout.minimumWidth: 20
                         Layout.rightMargin: 30
-                        icon.source: "qrc:///assets/icon-cancel.svg"
+                        icon.source: "qrc:/assets/icon-cancel.svg"
                         onClicked: viewModel.deleteMessage(index)
                     }
                 }
@@ -70,6 +71,6 @@ Item {
         width: parent.width
         height: parent.height
 	    focus: true
-        source : "qrc:///start.qml"
+        source : "qrc:/start.qml"
     }
 }

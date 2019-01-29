@@ -15,7 +15,9 @@
 #include "utility/io/coarsetimer.h"
 #include <set>
 
-#define LOG_VERBOSE_ENABLED 1
+#ifndef LOG_VERBOSE_ENABLED
+    #define LOG_VERBOSE_ENABLED 1
+#endif
 #include "utility/logger.h"
 
 using namespace beam;
@@ -26,7 +28,7 @@ Reactor::Ptr reactor;
 
 void timer_test() {
     reactor = Reactor::create();
-    Timer::Ptr timer = Timer::create(reactor);
+    Timer::Ptr timer = Timer::create(*reactor);
     int countdown = 5;
 
     LOG_DEBUG() << "setting up one-shot timer";
@@ -79,12 +81,12 @@ void on_coarse_timer(uint64_t id) {
 void coarsetimer_test() {
     reactor = Reactor::create();
     ctimer = CoarseTimer::create(
-        reactor,
+        *reactor,
         50, //msec
         on_coarse_timer
     );
 
-    for (uint64_t i=1; i<111; ++i) {
+    for (unsigned i=1; i<111; ++i) {
         ctimer->set_timer(200 + i*3, i);
     }
 
@@ -106,5 +108,4 @@ int main() {
     timer_test();
     coarsetimer_test();
 }
-
 

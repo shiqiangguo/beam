@@ -18,11 +18,45 @@
 #include "core/ecc_native.h"
 
 #include "core/serialization_adapters.h"
+#include "core/proto.h"
+#include <algorithm>
 
 namespace beam
 {
     using TxID = std::array<uint8_t, 16>;
-    using WalletID = PeerID;
+
+#pragma pack (push, 1)
+	struct WalletID
+	{
+		uintBigFor<BbsChannel>::Type m_Channel;
+		PeerID m_Pk;
+
+		WalletID() {}
+		WalletID(Zero_)
+		{
+			m_Channel = Zero;
+			m_Pk = Zero;
+		}
+
+		template <typename Archive>
+		void serialize(Archive& ar)
+		{
+			ar
+				& m_Channel
+				& m_Pk;
+		}
+
+		bool FromBuf(const ByteBuffer&);
+		bool FromHex(const std::string&);
+
+		bool IsValid() const; // isn't cheap
+
+		int cmp(const WalletID&) const;
+		COMPARISON_VIA_CMP
+	};
+#pragma pack (pop)
+
+    bool check_receiver_address(const std::string& addr);
 
     struct PrintableAmount
     {
@@ -37,18 +71,18 @@ namespace beam
 
     struct Coin;
 
+    enum class TxStatus : uint32_t
+    {
+        Pending,
+        InProgress,
+        Cancelled,
+        Completed,
+        Failed,
+        Registering
+    };
+
     struct TxDescription
     {
-        enum Status
-        {
-            Pending,
-            InProgress,
-            Cancelled,
-            Completed,
-            Failed,
-            Registered
-        };
-
         TxDescription() = default;
 
         TxDescription(const TxID& txId
@@ -71,143 +105,247 @@ namespace beam
             , m_createTime{ createTime }
             , m_modifyTime{ createTime }
             , m_sender{ sender }
-            , m_status{ Pending }
-            , m_fsmState{}
-        {}
+            , m_status{ TxStatus::Pending }
+        {
+
+        }
 
         TxID m_txId;
         Amount m_amount=0;
         Amount m_fee=0;
 		Amount m_change=0;
         Height m_minHeight=0;
-        WalletID m_peerId;
-        WalletID m_myId;
+        WalletID m_peerId = Zero;
+        WalletID m_myId = Zero;
         ByteBuffer m_message;
         Timestamp m_createTime=0;
         Timestamp m_modifyTime=0;
         bool m_sender=false;
-        Status m_status=Failed;
-        ByteBuffer m_fsmState;
+        TxStatus m_status=TxStatus::Pending;
+        Merkle::Hash m_kernelID = Zero;
 
         bool canResume() const
         {
-            return m_status == Pending || m_status == InProgress || m_status == Registered;
+            return m_status == TxStatus::Pending 
+                || m_status == TxStatus::InProgress 
+                || m_status == TxStatus::Registering;
+        }
+
+        bool canCancel() const
+        {
+            return m_status == beam::TxStatus::InProgress
+                || m_status == beam::TxStatus::Pending;
+        }
+
+        bool canDelete() const
+        {
+            return m_status == beam::TxStatus::Failed
+                || m_status == beam::TxStatus::Completed
+                || m_status == beam::TxStatus::Cancelled;
         }
     };
 
     namespace wallet
     {
-        std::pair<ECC::Scalar::Native, ECC::Scalar::Native> splitKey(const ECC::Scalar::Native& key, uint64_t index);
+        template <typename T>
+        ByteBuffer toByteBuffer(const T& value)
+        {
+            Serializer s;
+            s & value;
+            ByteBuffer b;
+            s.swap_buf(b);
+            return b;
+        }
+
+        ByteBuffer toByteBuffer(const ECC::Point::Native& value);
+        ByteBuffer toByteBuffer(const ECC::Scalar::Native& value);
+
+        enum class TxParameterID : uint8_t
+        {
+            // public parameters
+            TransactionType = 0,
+            IsSender = 1,
+            Amount = 2,
+            Fee = 3,
+            MinHeight = 4,
+            Message = 5,
+            MyID = 6,
+            PeerID = 7,
+            //Inputs = 8,
+            //Outputs = 9,
+            CreateTime = 10,
+            IsInitiator = 11,
+            MaxHeight = 12,
+            AmountList = 13,
+
+			PeerProtoVersion = 16,
+
+            AtomicSwapCoin = 20,
+            AtomicSwapAmount = 21,
+
+            LockedAmount = 25,
+            LockedMinHeight = 26,
+            
+
+            PeerPublicSharedBlindingFactor = 23,
+
+            // signature parameters
+
+            PeerPublicNonce = 40,
+            SharedPeerPublicNonce = 41,
+            LockedPeerPublicNonce = 42,
+
+            PeerPublicExcess = 50,
+            SharedPeerPublicExcess = 51,
+            LockedPeerPublicExcess = 52,
+
+            PeerSignature = 60,
+            SharedPeerSignature = 61,
+            LockedPeerSignature = 62,
+
+            PeerOffset = 70,
+            SharedPeerOffset = 71,
+            LockedPeerOffset = 72,
+
+            PeerInputs = 80,
+            LockedPeerInputs = 82,
+            PeerOutputs = 81,
+            LockedPeerOutputs = 83,
+            SharedPeerInputs = 84,
+            SharedPeerOutputs = 85,
+
+            TransactionRegistered = 90,
+
+            FailureReason = 92,
+
+			PaymentConfirmation = 99,
+
+            // private parameters
+            PrivateFirstParam = 128,
+
+            ModifyTime = 128,
+            KernelProofHeight = 129,
+
+            BlindingExcess = 130,
+            SharedBlindingExcess = 131,
+            LockedBlindingExcess = 132,
+
+            KernelUnconfirmedHeight = 133,
+
+            Offset = 140,
+            SharedOffset = 141,
+            LockedOffset = 142,
+
+            Change = 150,
+            Status = 151,
+            KernelID = 152,
+
+			MyAddressID = 158, // in case the address used in the tx is eventually deleted, the user should still be able to prove it was owned
+
+            SharedBlindingFactor = 160,
+            LockedBlindingFactor = 161,
+			MyNonce = 162,
+            SharedPeerBlindingFactor = 170,
+
+            Inputs = 180,
+            SharedInputs = 181,
+            LockedInputs = 182,
+            
+            Outputs = 190,
+            SharedOutputs = 191,
+            LockedOutputs = 192,
+            State = 255
+
+        };
+
+        enum class TxType : uint8_t
+        {
+            Simple,
+            AtomicSwap
+        };
+
+        enum class AtomicSwapCoin
+        {
+            Bitcoin
+        };
 
         // messages
-        struct Invite
+        struct SetTxParameter
         {
-            WalletID m_from;
-            std::string m_message;
-            TxID m_txId;
-            ECC::Amount m_amount;
-            ECC::Amount m_fee;
-            Height m_height;
-            bool m_send;
-            ECC::Point m_publicPeerExcess;
-            ECC::Scalar m_offset;
-            ECC::Point m_publicPeerNonce;
-            std::vector<Input::Ptr> m_inputs;
-            std::vector<Output::Ptr> m_outputs;
+            WalletID m_From;
+            TxID m_TxID;
 
-            Invite()
-                : m_from(Zero)
-                , m_amount(0)
-                , m_fee(0)
-                , m_height(0)
-                , m_send{true}
+            TxType m_Type;
 
+            std::vector<std::pair<TxParameterID, ByteBuffer>> m_Parameters;
+
+            template <typename T>
+            SetTxParameter& AddParameter(TxParameterID paramID, T&& value)
             {
-
+                m_Parameters.emplace_back(paramID, toByteBuffer(value));
+                return *this;
             }
 
-            Invite(Invite&& other)
-                : m_from{other.m_from}
-                , m_message{std::move(other.m_message)}
-                , m_txId{other.m_txId}
-                , m_amount{ other.m_amount }
-                , m_fee{ other.m_fee }
-                , m_height{other.m_height }
-                , m_send{other.m_send}
-                , m_publicPeerExcess{other.m_publicPeerExcess}
-                , m_offset{other.m_offset}
-                , m_publicPeerNonce{other.m_publicPeerNonce}
-                , m_inputs{std::move(other.m_inputs)}
-                , m_outputs{std::move(other.m_outputs)}
+            template <typename T>
+            bool GetParameter(TxParameterID paramID, T& value) const 
             {
-
+                auto pit = std::find_if(m_Parameters.begin(), m_Parameters.end(), [paramID](const auto& p) { return p.first == paramID; });
+                if (pit == m_Parameters.end())
+                {
+                    return false;
+                }
+                const ByteBuffer& b = pit->second;
+                
+                if (!b.empty())
+                {
+                    Deserializer d;
+                    d.reset(b.data(), b.size());
+                    d & value;
+                }
+                else
+                {
+                    ZeroObject(value);
+                }
+                return true;
             }
 
-            SERIALIZE(m_from
-                    , m_message
-                    , m_txId
-                    , m_amount
-                    , m_fee
-                    , m_height
-                    , m_send
-                    , m_publicPeerExcess
-                    , m_offset
-                    , m_publicPeerNonce
-                    , m_inputs
-                    , m_outputs);
-        };
-
-        struct ConfirmTransaction
-        {
-            WalletID m_from;
-            TxID m_txId{};
-            ECC::Scalar m_peerSignature;
-
-            SERIALIZE(m_from, m_txId, m_peerSignature);
-        };
-
-        struct ConfirmInvitation
-        {
-            WalletID m_from;
-            TxID m_txId{};
-            ECC::Point m_publicPeerExcess;
-            ECC::Point m_publicPeerNonce;
-            ECC::Scalar m_peerSignature;
-
-            SERIALIZE(m_from
-                    , m_txId
-                    , m_publicPeerExcess
-                    , m_publicPeerNonce
-                    , m_peerSignature);
-        };
-
-        struct TxRegistered
-        {
-            WalletID m_from;
-            TxID m_txId;
-            bool m_value;
-            SERIALIZE(m_from, m_txId, m_value);
-        };
-
-        struct TxFailed
-        {
-            WalletID m_from;
-            TxID m_txId;
-            SERIALIZE(m_from, m_txId);
+            SERIALIZE(m_From, m_TxID, m_Type, m_Parameters);
+            static const size_t MaxParams = 20;
         };
 
         struct INegotiatorGateway
         {
             virtual ~INegotiatorGateway() {}
-            virtual void on_tx_completed(const TxDescription& ) = 0;
-            virtual void send_tx_failed(const TxDescription& ) = 0;
-            virtual void send_tx_invitation(const TxDescription&, Invite&&) = 0;
-            virtual void send_tx_confirmation(const TxDescription&, ConfirmTransaction&&) = 0;
-            virtual void send_tx_confirmation(const TxDescription&, ConfirmInvitation&&) = 0;
-            virtual void register_tx(const TxDescription&, Transaction::Ptr) = 0;
-            virtual void send_tx_registered(const TxDescription&) = 0;
-            virtual void confirm_outputs(const TxDescription&) = 0;
+            virtual void on_tx_completed(const TxID& ) = 0;
+            virtual void register_tx(const TxID&, Transaction::Ptr) = 0;
+            virtual void confirm_outputs(const std::vector<Coin>&) = 0;
+            virtual void confirm_kernel(const TxID&, const TxKernel&) = 0;
+            virtual bool get_tip(Block::SystemState::Full& state) const = 0;
+            virtual void send_tx_params(const WalletID& peerID, SetTxParameter&&) = 0;
         };
+
+        enum class ErrorType : uint8_t
+        {
+            NodeProtocolBase = 0,
+            NodeProtocolIncompatible = 1,
+            ConnectionTimedOut = 2,
+            ConnectionRefused = 3,
+			TimeOutOfSync = 4,
+		};
+
+		struct PaymentConfirmation
+		{
+			// I, the undersigned, being healthy in mind and body, hereby accept they payment specified below, that shall be delivered by the following kernel ID.
+			Amount m_Value;
+			ECC::Hash::Value m_KernelID;
+			PeerID m_Sender;
+			ECC::Signature m_Signature;
+
+			void get_Hash(ECC::Hash::Value&) const;
+			bool IsValid(const PeerID&) const;
+
+			void Sign(const ECC::Scalar::Native& sk);
+		};
     }
 }
 

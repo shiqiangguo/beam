@@ -54,7 +54,7 @@ libsodium-1.0.16
 build/
 debug/
 release/
-
+cmake-build-*/
 
 wallet/unittests/wallet_test
 beam/beam
@@ -97,3 +97,5 @@ CMakeSettings.json
 /utility/unittest/bridge_test
 /utility/unittest/config_test
 beam/wallet.dat
+3rdparty/opencl-miner/equihash_150_5.dat
+ui/beam.rc

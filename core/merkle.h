@@ -110,7 +110,7 @@ namespace Merkle {
 		struct Impl;
 	};
 
-	class CompactMmr
+	struct CompactMmr
 	{
 		// Only used to recalculate the new root hash after appending the element
 		// Can't generate proofs.
@@ -118,14 +118,47 @@ namespace Merkle {
 		uint64_t m_Count;
 		std::vector<Hash> m_vNodes; // rightmost branch, in top-down order
 
-	public:
-
 		CompactMmr() :m_Count(0) {}
 
 		void Append(const Hash&);
 
 		void get_Hash(Hash&) const;
 		void get_PredictedHash(Hash&, const Hash& hvAppend) const;
+	};
+
+	// A variant where the max number of elements is known in advance. All hashes are stored in a flat array.
+	class FixedMmmr
+		:public Mmr
+	{
+		std::vector<Hash> m_vHashes;
+		uint64_t m_Total;
+
+		uint64_t Pos2Idx(const Position& pos) const;
+
+	public:
+		FixedMmmr(uint64_t nTotal = 0) { Reset(nTotal); }
+		void Reset(uint64_t nTotal);
+	protected:
+		// Mmr
+		virtual void LoadElement(Hash& hv, const Position& pos) const override;
+		virtual void SaveElement(const Hash& hv, const Position& pos) override;
+	};
+
+	// On-the-fly hash or proof calculation, without storing extra elements. They are all calculated internally during every invocation.
+	// Applicable when used rarely, and you want to avoid extra mem allocation
+	class FlyMmr
+	{
+		struct Inner;
+	public:
+
+		uint64_t m_Count;
+		FlyMmr(uint64_t nCount = 0) :m_Count(nCount) {}
+
+		void get_Hash(Hash&) const;
+		bool get_Proof(IProofBuilder&, uint64_t i) const;
+
+	protected:
+		virtual void LoadElement(Hash& hv, uint64_t n) const = 0;
 	};
 
 	// Structure to effective encode proofs to multiple elements at-once.

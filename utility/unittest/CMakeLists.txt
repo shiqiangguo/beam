@@ -17,3 +17,5 @@ add_test_snippet(address_test utility)
 add_test_snippet(channel_test utility)
 add_test_snippet(config_test utility)
 add_test_snippet(bridge_test utility)
+add_test_snippet(ssl_test utility)
+

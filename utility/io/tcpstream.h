@@ -29,12 +29,12 @@ public:
     // 2) embed deserializer (protocol-specific) object into stream
 
     // errorCode==0 on new data
-    using Callback = std::function<void(ErrorCode errorCode, void* data, size_t size)>;
+    using Callback = std::function<bool(ErrorCode errorCode, void* data, size_t size)>;
 
     struct State {
         uint64_t received=0;
         uint64_t sent=0;
-        size_t unsent=0; // == _writeBuffer.size()
+        size_t unsent=0;
     };
 
     ~TcpStream();
@@ -47,25 +47,23 @@ public:
     void disable_read();
 
     /// Writes raw data, returns status code
-    Result write(const void* data, size_t size) {
-        return write(SharedBuffer(data, size));
+    Result write(const void* data, size_t size, bool flush=true) {
+        return write(SharedBuffer(data, size), flush);
     }
 
     /// Writes raw data, returns status code
-    Result write(const SharedBuffer& buf);
+    virtual Result write(const SharedBuffer& buf, bool flush=true);
 
     /// Writes raw data, returns status code
-    Result write(const std::vector<SharedBuffer>& fragments);
+    virtual Result write(const SerializedMsg& fragments, bool flush=true);
 
     /// Writes raw data, returns status code
-    Result write(const BufferChain& buf);
+    //virtual Result write(const BufferChain& fragments, bool flush=true);
 
     /// Shutdowns write side, waits for pending write requests to complete, but on reactor's side
-    void shutdown();
+    virtual void shutdown();
 
     bool is_connected() const;
-
-    void close();
 
     const State& state() const {
         return _state;
@@ -77,33 +75,37 @@ public:
     /// Returns peer address (non-null if connected)
     Address peer_address() const;
 
+    /// Enables tcp keep-alive
+    void enable_keepalive(unsigned initialDelaySecs);
+
+protected:
+    TcpStream();
+
+    /// read callback, returns whether to proceed
+    virtual bool on_read(ErrorCode errorCode, void* data, size_t size);
+
 private:
-    static void on_read(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf);
+    static void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf);
 
     friend class TcpServer;
+    friend class SslServer;
     friend class Reactor;
-
-    TcpStream() = default;
+    friend class TcpConnectors;
 
     void alloc_read_buffer();
     void free_read_buffer();
 
-    // sends async write request
-    Result send_write_request();
+    // sends async write request if flush == true
+    Result do_write(bool flush);
 
     // callback from write request
     void on_data_written(ErrorCode errorCode, size_t n);
-
-    // stream accepted from server
-    ErrorCode accepted(uv_handle_t* acceptor);
-
-    void connected(uv_stream_t* handle);
 
     uv_buf_t _readBuffer={0, 0};
     BufferChain _writeBuffer;
     Callback _callback;
     State _state;
-    bool _writeRequestSent=false;
+    Reactor::OnDataWritten _onDataWritten;
 };
 
 }} //namespaces

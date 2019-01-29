@@ -15,24 +15,21 @@
 #include "timer.h"
 #include <assert.h>
 
-#define LOG_VERBOSE_ENABLED 1
+#ifndef LOG_VERBOSE_ENABLED
+    #define LOG_VERBOSE_ENABLED 0
+#endif
 #include "utility/logger.h"
 
 namespace beam { namespace io {
 
-Timer::Ptr Timer::create(const Reactor::Ptr& reactor) {
-    assert(reactor);
+Timer::Ptr Timer::create(Reactor& reactor) {
     Ptr timer(new Timer());
-    ErrorCode errorCode = reactor->init_timer(timer.get());
+    ErrorCode errorCode = reactor.init_timer(timer.get());
     IO_EXCEPTION_IF(errorCode);
     return timer;
 }
 
-Timer::~Timer() {
-    LOG_VERBOSE() << ".";
-}
-
-Result Timer::start(unsigned intervalMsec, bool isPeriodic, Callback&& callback) {
+Result Timer::start(unsigned intervalMsec, bool isPeriodic, Callback callback) {
     assert(callback);
     _callback = std::move(callback);
     if (intervalMsec == unsigned(-1)) {

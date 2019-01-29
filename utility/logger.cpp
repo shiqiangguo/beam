@@ -14,9 +14,22 @@
 
 #include "logger_checkpoints.h"
 #include "helpers.h"
+#include "core/common.h"
 #include <boost/filesystem.hpp>
 #include <boost/iostreams/device/back_inserter.hpp>
+
+#if defined(__clang__)
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wunknown-warning-option"
+#  pragma clang diagnostic ignored "-Wtautological-constant-compare"
+#endif
+
 #include <boost/iostreams/filtering_stream.hpp>
+
+#if defined(__clang__)
+#  pragma clang diagnostic pop
+#endif
+
 #include <stdexcept>
 #include <iostream>
 #include <fstream>
@@ -135,9 +148,14 @@ private:
         string fileName(_fileNamePrefix);
         fileName += format_timestamp("%y_%m_%d_%H_%M_%S", local_timestamp_msec(), false);
         fileName += ".log";
+
         if (!_dstPath.empty())
         {
-            boost::filesystem::path path{ _dstPath };
+#ifdef WIN32
+            boost::filesystem::path path{ Utf8toUtf16(_dstPath.c_str()) };
+#else
+            boost::filesystem::path path{ _dstPath.c_str() };
+#endif
 
             if (!boost::filesystem::exists(path))
             {
@@ -145,12 +163,21 @@ private:
             }
 
             path /= fileName;
+#ifdef WIN32
+            _sink = _wfsopen(path.wstring().c_str(), L"ab", _SH_DENYNO);
+#else
             _sink = fopen(path.string().c_str(), "ab");
+#endif
         }
         else
         {
+#ifdef WIN32
+            _sink = _wfsopen(Utf8toUtf16(fileName.c_str()).c_str(), L"ab", _SH_DENYNO);
+#else
             _sink = fopen(fileName.c_str(), "ab");
+#endif
         }
+
         if (!_sink) throw runtime_error(string("cannot open file ") + fileName);
     }
 

@@ -16,23 +16,50 @@
 
 #include <QThread>
 #include <memory>
+#include <atomic>
+#include <condition_variable>
 #include "core/block_crypt.h"
-#include "beam/node.h"
+#include "node/node.h"
+#include "node/node_client.h"
 #include "utility/io/reactor.h"
 
-class NodeModel : public QThread
-                , public beam::INodeObserver
+class NodeModel 
+    : public QObject
+    , private beam::INodeClientObserver
 {
     Q_OBJECT
 public:
-    NodeModel(const ECC::NoLeak<ECC::uintBig>& seed);
-    ~NodeModel();
-private:
-    void run() override;
-    void OnSyncProgress(int done, int total) override;
+
+    NodeModel();
+
+    void setKdf(beam::Key::IKdf::Ptr);
+    void startNode();
+    void stopNode();
+
+    void start();
+
+    bool isNodeRunning() const;
+
 signals:
     void syncProgressUpdated(int done, int total);
-private: 
-    std::weak_ptr<beam::io::Reactor> m_reactor;
-    ECC::NoLeak<ECC::uintBig> m_seed;
+    void startedNode();
+    void stoppedNode();
+
+protected:
+    void onSyncProgressUpdated(int done, int total) override;
+    void onStartedNode() override;
+    void onStoppedNode() override;
+    void onFailedToStartNode() override;
+
+    uint16_t getLocalNodePort() override;
+    std::string getLocalNodeStorage() override;
+    unsigned int getLocalNodeMiningThreads() override;
+    std::string getTempDir() override;
+    std::vector<std::string> getLocalNodePeers() override;
+#ifdef BEAM_USE_GPU
+    std::unique_ptr<beam::IExternalPOW> getStratumServer() override;
+#endif //  BEAM_USE_GPU
+
+private:
+    beam::NodeClient m_nodeClient;
 };

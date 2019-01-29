@@ -29,10 +29,10 @@ using namespace std;
 using PeerLocator = uint64_t;
 
 std::vector<uint8_t> checksum(const io::SharedBuffer& buf) {
-    ECC::Hash::Processor hp;
-	hp.Write(buf.data, buf.size);
-    ECC::Hash::Value h;
-    hp >> h;
+	ECC::Hash::Value h;
+	ECC::Hash::Processor()
+		<< Blob(buf.data, (uint32_t) buf.size)
+		>> h;
     return std::vector<uint8_t>((uint8_t*)h.m_pData, (uint8_t*)h.m_pData + 32);
 }
 
@@ -126,7 +126,7 @@ struct NetworkSide : public IErrorHandler, public ILogicToNetwork, public AsyncC
         proxy(_proxy),
         address(_address),
         thisIsServer(_thisIsServer),
-        bridge(*this, _reactor)
+        bridge(*this, *_reactor)
     {
         // TODO can be wrapped into macros
         protocol.add_message_handler<NetworkSide, Request, &NetworkSide::on_request>(requestCode, this, 1, 20000);
@@ -142,7 +142,7 @@ struct NetworkSide : public IErrorHandler, public ILogicToNetwork, public AsyncC
         // Only event handling matters
         if (thisIsServer) {
             // TODO error handling here
-            server = io::TcpServer::create(_reactor, address, BIND_THIS_MEMFN(on_stream_accepted));
+            server = io::TcpServer::create(*_reactor, address, BIND_THIS_MEMFN(on_stream_accepted));
         } else {
             _reactor->tcp_connect(
                 address,
@@ -282,7 +282,7 @@ struct AppSideAsyncContext : public AsyncContext {
     NetworkToLogicBridge bridge;
 
     AppSideAsyncContext(INetworkToLogic& logicCallbacks) :
-        bridge(logicCallbacks, _reactor)
+        bridge(logicCallbacks, *_reactor)
     {}
 
     INetworkToLogic& get_proxy() {

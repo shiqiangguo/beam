@@ -15,7 +15,7 @@
 #include "wallet/wallet_network.h"
 #include "core/common.h"
 
-#include "node.h"
+#include "node/node.h"
 #include "core/ecc_native.h"
 #include "core/ecc.h"
 #include "core/serialization_adapters.h"
@@ -23,6 +23,8 @@
 #include "utility/options.h"
 #include "utility/helpers.h"
 #include <iomanip>
+
+#include "pow/external_pow.h"
 
 #include <boost/program_options.hpp>
 #include <boost/filesystem.hpp>
@@ -41,7 +43,7 @@ namespace
         cout << options << std::endl;
     }
 
-    bool ReadTreasury(std::vector<Block::Body>& vBlocks, const string& sPath)
+    bool ReadTreasury(ByteBuffer& bb, const string& sPath)
     {
 		if (sPath.empty())
 			return false;
@@ -50,14 +52,37 @@ namespace
 		if (!f.Open(sPath.c_str(), true))
 			return false;
 
-		yas::binary_iarchive<std::FStream, SERIALIZE_OPTIONS> arc(f);
-        arc & vBlocks;
+		size_t nSize = static_cast<size_t>(f.get_Remaining());
+		if (!nSize)
+			return false;
 
-		return true;
+		bb.resize(f.get_Remaining());
+		return f.read(&bb.front(), nSize) == nSize;
     }
+
+	void find_certificates(IExternalPOW::Options& o, const std::string& stratumDir, bool useTLS) {
+
+		boost::filesystem::path p(stratumDir);
+		p = boost::filesystem::canonical(p);
+
+        if (useTLS)
+        {
+		    static const std::string certFileName("stratum.crt");
+		    static const std::string keyFileName("stratum.key");
+
+		    o.privKeyFile = (p / keyFileName).string();
+		    o.certFile = (p / certFileName).string();
+        }
+
+		static const std::string apiKeysFileName("stratum.api.keys");
+		if (boost::filesystem::exists(p / apiKeysFileName))
+			o.apiKeysFile = (p / apiKeysFileName).string();
+	}
 }
 
-#define LOG_VERBOSE_ENABLED 0
+#ifndef LOG_VERBOSE_ENABLED
+    #define LOG_VERBOSE_ENABLED 0
+#endif
 
 io::Reactor::Ptr reactor;
 
@@ -65,9 +90,11 @@ static const unsigned LOG_ROTATION_PERIOD = 3*60*60*1000; // 3 hours
 
 int main_impl(int argc, char* argv[])
 {
+	beam::Crash::InstallHandler(NULL);
+
 	try
 	{
-		auto options = createOptionsDescription(GENERAL_OPTIONS | NODE_OPTIONS);
+		auto [options, visibleOptions] = createOptionsDescription(GENERAL_OPTIONS | NODE_OPTIONS);
 
 		po::variables_map vm;
 		try
@@ -77,14 +104,14 @@ int main_impl(int argc, char* argv[])
 		catch (const po::error& e)
 		{
 			cout << e.what() << std::endl;
-			printHelp(options);
+			printHelp(visibleOptions);
 
 			return 0;
 		}
 
 		if (vm.count(cli::HELP))
 		{
-			printHelp(options);
+			printHelp(visibleOptions);
 
 			return 0;
 		}
@@ -102,11 +129,7 @@ int main_impl(int argc, char* argv[])
 		}
 
 		int logLevel = getLogLevel(cli::LOG_LEVEL, vm, LOG_LEVEL_DEBUG);
-		int fileLogLevel = getLogLevel(cli::FILE_LOG_LEVEL, vm, LOG_LEVEL_INFO);
-
-#if LOG_VERBOSE_ENABLED
-		logLevel = LOG_LEVEL_VERBOSE;
-#endif
+		int fileLogLevel = getLogLevel(cli::FILE_LOG_LEVEL, vm, LOG_LEVEL_DEBUG);
 
 		const auto path = boost::filesystem::system_complete("./logs");
 		auto logger = beam::Logger::create(logLevel, logLevel, fileLogLevel, "node_", path.string());
@@ -126,10 +149,7 @@ int main_impl(int argc, char* argv[])
 
 				io::Reactor::GracefulIntHandler gih(*reactor);
 
-				NoLeak<uintBig> walletSeed;
-				walletSeed.V = Zero;
-
-				io::Timer::Ptr logRotateTimer = io::Timer::create(reactor);
+				io::Timer::Ptr logRotateTimer = io::Timer::create(*reactor);
 				logRotateTimer->start(
 					LOG_ROTATION_PERIOD, true,
 					[]() {
@@ -137,21 +157,90 @@ int main_impl(int argc, char* argv[])
 					}
 				);
 
+				std::unique_ptr<IExternalPOW> stratumServer;
+				auto stratumPort = vm[cli::STRATUM_PORT].as<uint16_t>();
+
+				if (stratumPort > 0) {
+					IExternalPOW::Options powOptions;
+                    find_certificates(powOptions, vm[cli::STRATUM_SECRETS_PATH].as<string>(), vm[cli::STRATUM_USE_TLS].as<bool>());
+					stratumServer = IExternalPOW::create(powOptions, *reactor, io::Address().port(stratumPort));
+				}
+
 				{
 					beam::Node node;
 
 					node.m_Cfg.m_Listen.port(port);
 					node.m_Cfg.m_Listen.ip(INADDR_ANY);
 					node.m_Cfg.m_sPathLocal = vm[cli::STORAGE].as<string>();
-					node.m_Cfg.m_MiningThreads = vm[cli::MINING_THREADS].as<uint32_t>();
-					node.m_Cfg.m_MinerID = vm[cli::MINER_ID].as<uint32_t>();
-					node.m_Cfg.m_VerificationThreads = vm[cli::VERIFICATION_THREADS].as<int>();
-					if (node.m_Cfg.m_MiningThreads > 0)
-					{
-						if (!beam::read_wallet_seed(node.m_Cfg.m_WalletKey, vm)) {
-                            LOG_ERROR() << " wallet seed is not provided. You have pass wallet seed for mining node.";
-                            return -1;
+#if defined(BEAM_USE_GPU)
+
+                    if (!stratumServer)
+                    {
+                        if (vm[cli::MINER_TYPE].as<string>() == "gpu")
+                        {
+                            stratumServer = IExternalPOW::create_opencl_solver({-1});
+                            // now for GPU only 0 thread
+                            node.m_Cfg.m_MiningThreads = 0;
                         }
+                        else
+                        {
+                            node.m_Cfg.m_MiningThreads = vm[cli::MINING_THREADS].as<uint32_t>();
+                        }
+                    }
+#else
+					node.m_Cfg.m_MiningThreads = vm[cli::MINING_THREADS].as<uint32_t>();
+#endif
+					node.m_Cfg.m_VerificationThreads = vm[cli::VERIFICATION_THREADS].as<int>();
+
+					node.m_Cfg.m_LogUtxos = vm[cli::LOG_UTXOS].as<bool>();
+
+					std::string sKeyOwner;
+					{
+						const auto& var = vm[cli::KEY_OWNER];
+						if (!var.empty())
+							sKeyOwner = var.as<std::string>();
+					}
+					std::string sKeyMine;
+					{
+						const auto& var = vm[cli::KEY_MINE];
+						if (!var.empty())
+							sKeyMine = var.as<std::string>();
+					}
+
+					if (!(sKeyOwner.empty() && sKeyMine.empty()))
+					{
+						SecString pass;
+						if (!beam::read_wallet_pass(pass, vm))
+						{
+							LOG_ERROR() << "Please, provide password for the keys.";
+							return -1;
+						}
+
+						KeyString ks;
+						ks.SetPassword(Blob(pass.data(), static_cast<uint32_t>(pass.size())));
+
+						if (!sKeyMine.empty())
+						{
+							ks.m_sRes = sKeyMine;
+
+							std::shared_ptr<HKdf> pKdf = std::make_shared<HKdf>();
+							if (!ks.Import(*pKdf))
+								throw std::runtime_error("miner key import failed");
+
+							node.m_Keys.m_pMiner = pKdf;
+							node.m_Keys.m_nMinerSubIndex = atoi(ks.m_sMeta.c_str());
+						}
+
+						if (!sKeyOwner.empty())
+						{
+							ks.m_sRes = sKeyOwner;
+
+							std::shared_ptr<HKdfPub> pKdf = std::make_shared<HKdfPub>();
+							if (!ks.Import(*pKdf))
+								throw std::runtime_error("view key import failed");
+
+							node.m_Keys.m_pOwner = pKdf;
+						}
 					}
 
 					std::vector<std::string> vPeers = getCfgPeers(vm);
@@ -186,24 +275,37 @@ int main_impl(int argc, char* argv[])
 					if (vm.count(cli::TREASURY_BLOCK))
 					{
 						string sPath = vm[cli::TREASURY_BLOCK].as<string>();
-						ReadTreasury(node.m_Cfg.m_vTreasury, sPath);
-
-						if (!node.m_Cfg.m_vTreasury.empty())
-							LOG_INFO() << "Treasury blocs read: " << node.m_Cfg.m_vTreasury.size();
+						if (!ReadTreasury(node.m_Cfg.m_Treasury, sPath))
+							node.m_Cfg.m_Treasury.clear();
+						else
+						{
+							if (!node.m_Cfg.m_Treasury.empty())
+								LOG_INFO() << "Treasury size: " << node.m_Cfg.m_Treasury.size();
+						}
 					}
 
-#ifdef BEAM_TESTNET
-                    node.m_Cfg.m_ControlState.m_Height = Rules::HeightGenesis;
-					node.m_Cfg.m_ControlState.m_Hash = {
-						0xf6, 0xf9, 0x01, 0x39, 0x3a, 0x10, 0x30, 0x80, 0x86, 0x4f, 0x75, 0xb6, 0x6b, 0x78, 0xa9, 0x6e,
-						0x6d, 0xf0, 0x10, 0xb5, 0x3f, 0x9a, 0xaf, 0x32, 0xe3, 0xcb, 0xc7, 0x5f, 0xa3, 0x6a, 0x21, 0x97
-					};
-#endif
-					node.Initialize();
+					if (vm.count(cli::RESYNC))
+						node.m_Cfg.m_Sync.m_ForceResync = vm[cli::RESYNC].as<bool>();
+
+					node.m_Cfg.m_Bbs = vm[cli::BBS_ENABLE].as<bool>();
+
+					node.Initialize(stratumServer.get());
 
 					Height hImport = vm[cli::IMPORT].as<Height>();
 					if (hImport)
 						node.ImportMacroblock(hImport);
+
+					io::Timer::Ptr pCrashTimer;
+
+					int nCrash = vm.count(cli::CRASH) ? vm[cli::CRASH].as<int>() : 0;
+					if (nCrash)
+					{
+						pCrashTimer = io::Timer::create(*reactor);
+
+						pCrashTimer->start(5000, false, [nCrash]() {
+							Crash::Induce((Crash::Type) (nCrash - 1));
+						});
+					}
 
 					reactor->run();
 				}
@@ -212,7 +314,7 @@ int main_impl(int argc, char* argv[])
 		catch (const po::error& e)
 		{
 			LOG_ERROR() << e.what();
-			printHelp(options);
+			printHelp(visibleOptions);
 		}
 		catch (const std::runtime_error& e)
 		{
@@ -222,6 +324,10 @@ int main_impl(int argc, char* argv[])
 	catch (const std::exception& e)
 	{
 		std::cout << e.what() << std::endl;
+	}
+	catch (const beam::CorruptionException& e)
+	{
+		std::cout << "Corruption: " << e.m_sErr << std::endl;
 	}
 
     return 0;

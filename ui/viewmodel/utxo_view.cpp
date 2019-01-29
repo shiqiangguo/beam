@@ -19,6 +19,16 @@ using namespace beam;
 using namespace std;
 using namespace beamui;
 
+namespace
+{
+template<typename T>
+bool compareUtxo(const T& lf, const T& rt, Qt::SortOrder sortOrder)
+{
+    if (sortOrder == Qt::DescendingOrder)
+        return lf > rt;
+    return lf < rt;
+}
+}
 
 UtxoItem::UtxoItem(const beam::Coin& coin)
     : _coin{ coin }
@@ -26,9 +36,14 @@ UtxoItem::UtxoItem(const beam::Coin& coin)
 
 }
 
+UtxoItem::~UtxoItem()
+{
+
+}
+
 QString UtxoItem::amount() const
 {
-    return BeamToString(_coin.m_amount) + " BEAM";
+    return BeamToString(_coin.m_ID.m_Value) + " BEAM";
 }
 
 QString UtxoItem::height() const
@@ -45,48 +60,73 @@ QString UtxoItem::maturity() const
 
 QString UtxoItem::status() const
 {
-    static const char* Names[] =
+    switch(_coin.m_status)
     {
-        "Unconfirmed",
-        "Unspent",
-        "Locked",
-        "Spent",
-        "Draft"
-    };
-    return Names[_coin.m_status];
+        case Coin::Available:
+            return tr("available");
+        case Coin::Maturing:
+            return tr("maturing\n(till block height ") + QString::number(_coin.m_maturity) + ")";
+        case Coin::Unavailable:
+            return tr("unavailable\n(mining result rollback)");
+        case Coin::Outgoing:
+            return tr("in progress\n(outgoing)");
+        case Coin::Incoming:
+			return (_coin.m_ID.m_Type == Key::Type::Change) ?
+				tr("in progress\n(change)") :
+				tr("in progress\n(incoming)");
+        case Coin::Spent:
+            return tr("spent");
+        default:
+            assert(false && "Unknown key type");
+    }
+
+    return "";
 }
 
 QString UtxoItem::type() const
 {
-    static const char* Names[] =
+    switch (_coin.m_ID.m_Type)
     {
-        "Comission",
-        "Coinbase",
-        "Kernel",
-        "Regular",
-        "Identity",
-        "SChannelNonce"
-    };
-    return Names[static_cast<int>(_coin.m_key_type)];
+    case Key::Type::Comission: return tr("Transaction fee");
+    case Key::Type::Coinbase: return tr("Coinbase");
+    case Key::Type::Regular: return tr("Regular");
+    case Key::Type::Change: return tr("Change");
+    case Key::Type::Treasury: return tr("Treasury");
+    }
+
+    return FourCC::Text(_coin.m_ID.m_Type).m_sz;
+}
+
+beam::Amount UtxoItem::rawAmount() const
+{
+    return _coin.m_ID.m_Value;
+}
+
+beam::Height UtxoItem::rawHeight() const
+{
+    return _coin.m_createHeight;
+}
+
+beam::Height UtxoItem::rawMaturity() const
+{
+    return _coin.m_maturity;
 }
 
 
 UtxoViewModel::UtxoViewModel()
     : _model{*AppModel::getInstance()->getWallet()}
+    , _sortOrder(Qt::DescendingOrder)
 {
-    connect(&_model, SIGNAL(onAllUtxoChanged(const std::vector<beam::Coin>&)),
+    connect(&_model, SIGNAL(allUtxoChanged(const std::vector<beam::Coin>&)),
         SLOT(onAllUtxoChanged(const std::vector<beam::Coin>&)));
-    connect(&_model, SIGNAL(onStatus(const WalletStatus&)), SLOT(onStatus(const WalletStatus&)));
+    connect(&_model, SIGNAL(walletStatus(const WalletStatus&)), SLOT(onStatus(const WalletStatus&)));
 
-    if (_model.async)
-    {
-        _model.async->getUtxosStatus();
-    }
+    _model.getAsync()->getUtxosStatus();
 }
 
 UtxoViewModel::~UtxoViewModel()
 {
-
+    qDeleteAll(_allUtxos);
 }
 
 QQmlListProperty<UtxoItem> UtxoViewModel::getAllUtxos()
@@ -104,29 +144,116 @@ QString UtxoViewModel::getCurrentStateHash() const
     return _currentStateHash;
 }
 
+QString UtxoViewModel::sortRole() const
+{
+    return _sortRole;
+}
+
+void UtxoViewModel::setSortRole(const QString& value)
+{
+    _sortRole = value;
+    sortUtxos();
+}
+
+Qt::SortOrder UtxoViewModel::sortOrder() const
+{
+    return _sortOrder;
+}
+
+void UtxoViewModel::setSortOrder(Qt::SortOrder value)
+{
+    _sortOrder = value;
+    sortUtxos();
+}
+
 void UtxoViewModel::onAllUtxoChanged(const std::vector<beam::Coin>& utxos)
 {
+    // TODO: It's dirty hack. Should use QAbstractListModel instead of QQmlListProperty
+    auto tmpList = _allUtxos;
+    
     _allUtxos.clear();
 
-    std::vector<beam::Coin> tmp(utxos);
+    emit allUtxoChanged();
 
-    std::sort(tmp.begin(), tmp.end(), [](const Coin& lf, const Coin& rt)
-    {
-        return lf.m_createHeight > rt.m_createHeight;
-    });
+    qDeleteAll(tmpList);
 
-    for (const auto& utxo : tmp)
+    for (const auto& utxo : utxos)
     {
         _allUtxos.push_back(new UtxoItem(utxo));
     }
 
-    emit allUtxoChanged();
+    sortUtxos();
 }
 
 void UtxoViewModel::onStatus(const WalletStatus& status)
 {
-    _currentHeight = QString::asprintf("%ld", status.stateID.m_Height);
+    _currentHeight = QString::fromStdString(to_string(status.stateID.m_Height));
     _currentStateHash = QString(beam::to_hex(status.stateID.m_Hash.m_pData, 10).c_str());
     emit stateChanged();
 }
 
+void UtxoViewModel::sortUtxos()
+{
+    auto cmp = generateComparer();
+    std::sort(_allUtxos.begin(), _allUtxos.end(), cmp);
+
+    emit allUtxoChanged();
+}
+
+QString UtxoViewModel::amountRole() const
+{
+    return "amount";
+}
+
+QString UtxoViewModel::heightRole() const
+{
+    return "height";
+}
+
+QString UtxoViewModel::maturityRole() const
+{
+    return "maturity";
+}
+
+QString UtxoViewModel::statusRole() const
+{
+    return "status";
+}
+
+QString UtxoViewModel::typeRole() const
+{
+    return "type";
+}
+
+std::function<bool(const UtxoItem*, const UtxoItem*)> UtxoViewModel::generateComparer()
+{
+    if (_sortRole == amountRole())
+        return [sortOrder = _sortOrder](const UtxoItem* lf, const UtxoItem* rt)
+    {
+        return compareUtxo(lf->rawAmount(), rt->rawAmount(), sortOrder);
+    };
+
+    if (_sortRole == maturityRole())
+        return [sortOrder = _sortOrder](const UtxoItem* lf, const UtxoItem* rt)
+    {
+        return compareUtxo(lf->rawMaturity(), rt->rawMaturity(), sortOrder);
+    };
+
+    if (_sortRole == statusRole())
+        return [sortOrder = _sortOrder](const UtxoItem* lf, const UtxoItem* rt)
+    {
+        return compareUtxo(lf->status(), rt->status(), sortOrder);
+    };
+
+    if (_sortRole == typeRole())
+        return [sortOrder = _sortOrder](const UtxoItem* lf, const UtxoItem* rt)
+    {
+        return compareUtxo(lf->type(), rt->type(), sortOrder);
+    };
+
+    // defult for heightRole
+    return [sortOrder = _sortOrder](const UtxoItem* lf, const UtxoItem* rt)
+    {
+        return compareUtxo(lf->rawHeight(), rt->rawHeight(), sortOrder);
+    };
+}

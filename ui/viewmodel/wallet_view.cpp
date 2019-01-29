@@ -19,13 +19,32 @@
 #include <QApplication>
 #include <QClipboard>
 #include "model/app_model.h"
-#include "version.h"
+#include "qrcode/QRCodeGenerator.h"
+#include <QtGui/qimage.h>
+#include <QtCore/qbuffer.h>
 
 using namespace beam;
 using namespace std;
 using namespace beamui;
 
-TxObject::TxObject(const TxDescription& tx) : _tx(tx) {}
+namespace
+{
+    const int kDefaultFeeInGroth = 10;
+
+    template<typename T>
+    bool compareTx(const T& lf, const T& rt, Qt::SortOrder sortOrder)
+    {
+        if (sortOrder == Qt::DescendingOrder)
+            return lf > rt;
+        return lf < rt;
+    }
+}
+
+TxObject::TxObject(const TxDescription& tx) : _tx(tx) 
+{
+    auto kernelID = QString::fromStdString(to_hex(_tx.m_kernelID.m_pData, _tx.m_kernelID.nBytes));
+    setKernelID(kernelID);
+}
 
 bool TxObject::income() const
 {
@@ -75,21 +94,18 @@ QString TxObject::change() const
 
 QString TxObject::status() const
 {
-    static QString Names[] = { tr("Pending"), tr("In Progress"), tr("Cancelled"), tr("Completed"), tr("Failed"), tr("Confirming") };
-    return Names[_tx.m_status];
+    static QString Names[] = { tr("Pending"), tr("In Progress"), tr("Cancelled"), tr("Completed"), tr("Failed"), tr("Syncing with blockchain") };
+    return Names[static_cast<uint32_t>(_tx.m_status)];
 }
 
 bool TxObject::canCancel() const
 {
-    return _tx.m_status == beam::TxDescription::InProgress
-        || _tx.m_status == beam::TxDescription::Pending;
+    return _tx.canCancel();
 }
 
 bool TxObject::canDelete() const
 {
-    return _tx.m_status == beam::TxDescription::Failed
-        || _tx.m_status == beam::TxDescription::Completed
-        || _tx.m_status == beam::TxDescription::Cancelled;
+    return _tx.canDelete();
 }
 
 void TxObject::setUserName(const QString& name)
@@ -142,49 +158,71 @@ QString TxObject::getFee() const
     return QString{};
 }
 
+const beam::TxDescription& TxObject::getTxDescription() const
+{
+    return _tx;
+}
+
+void TxObject::setStatus(beam::TxStatus status)
+{
+    if (_tx.m_status != status)
+    {
+        _tx.m_status = status;
+        emit statusChanged();
+    }
+}
+
+QString TxObject::getKernelID() const
+{
+    return _kernelID;
+}
+
+void TxObject::setKernelID(const QString& value)
+{
+    if (_kernelID != value)
+    {
+        _kernelID = value;
+        emit kernelIDChanged();
+    }
+}
+
+void TxObject::update(const beam::TxDescription& tx)
+{
+    setStatus(tx.m_status);
+    auto kernelID = QString::fromStdString(to_hex(tx.m_kernelID.m_pData, tx.m_kernelID.nBytes));
+    setKernelID(kernelID);
+}
+
 WalletViewModel::WalletViewModel()
     : _model(*AppModel::getInstance()->getWallet())
     , _status{ 0, 0, 0, 0, {0, 0, 0}, {} }
     , _sendAmount("0")
-    , _feeMils("0")
+    , _feeGrothes("0")
     , _change(0)
-    , _isSyncInProgress{false}
-    , _isOfflineStatus{false}
-    , _isFailedStatus{false}
-    , _nodeDone{0}
-    , _nodeTotal{0}
-    , _nodeSyncProgress{0}
+    , _expires(0)
 {
-    connect(&_model, SIGNAL(onStatus(const WalletStatus&)), SLOT(onStatus(const WalletStatus&)));
+    connect(&_model, SIGNAL(walletStatus(const WalletStatus&)), SLOT(onStatus(const WalletStatus&)));
 
-    connect(&_model, SIGNAL(onTxStatus(const std::vector<beam::TxDescription>&)), 
-        SLOT(onTxStatus(const std::vector<beam::TxDescription>&)));
+    connect(&_model, SIGNAL(txStatus(beam::ChangeAction, const std::vector<beam::TxDescription>&)),
+        SLOT(onTxStatus(beam::ChangeAction, const std::vector<beam::TxDescription>&)));
 
-    connect(&_model, SIGNAL(onTxPeerUpdated(const std::vector<beam::TxPeer>&)),
-        SLOT(onTxPeerUpdated(const std::vector<beam::TxPeer>&)));
-
-    connect(&_model, SIGNAL(onSyncProgressUpdated(int, int)),
-        SLOT(onSyncProgressUpdated(int, int)));
-
-    connect(&_model, SIGNAL(onChangeCalculated(beam::Amount)),
+    connect(&_model, SIGNAL(changeCalculated(beam::Amount)),
         SLOT(onChangeCalculated(beam::Amount)));
 
-    connect(&_model, SIGNAL(onChangeCurrentWalletIDs(beam::WalletID, beam::WalletID)),
+    connect(&_model, SIGNAL(changeCurrentWalletIDs(beam::WalletID, beam::WalletID)),
         SLOT(onChangeCurrentWalletIDs(beam::WalletID, beam::WalletID)));
 
-    connect(&_model, SIGNAL(onAdrresses(bool, const std::vector<beam::WalletAddress>&)),
-        SLOT(onAdrresses(bool, const std::vector<beam::WalletAddress>&)));
+    connect(&_model, SIGNAL(adrresses(bool, const std::vector<beam::WalletAddress>&)),
+        SLOT(onAddresses(bool, const std::vector<beam::WalletAddress>&)));
 
-    connect(&_model, SIGNAL(onGeneratedNewWalletID(const beam::WalletID&)),
-        SLOT(onGeneratedNewWalletID(const beam::WalletID&)));
+    connect(&_model, SIGNAL(generatedNewAddress(const beam::WalletAddress&)),
+        SLOT(onGeneratedNewAddress(const beam::WalletAddress&)));
 
-    if (AppModel::getInstance()->getSettings().getRunLocalNode())
-    {
-        connect(&AppModel::getInstance()->getNode(), SIGNAL(syncProgressUpdated(int, int)),
-            SLOT(onNodeSyncProgressUpdated(int, int)));
-    }
-    
-    _model.async->getWalletStatus();
+    connect(&_model, SIGNAL(sendMoneyVerified()), SLOT(onSendMoneyVerified()));
+
+    connect(&_model, SIGNAL(cantSendToExpired()), SLOT(onCantSendToExpired()));
+
+    _model.getAsync()->getWalletStatus();
 }
 
 WalletViewModel::~WalletViewModel()
@@ -192,54 +230,39 @@ WalletViewModel::~WalletViewModel()
 
 }
 
-void WalletViewModel::cancelTx(int index)
+void WalletViewModel::cancelTx(TxObject* pTxObject)
 {
-    auto *p = static_cast<TxObject*>(_tx[index]);
-    // TODO: temporary fix
-    if (p->canCancel())
+    if (pTxObject->canCancel())
     {
-        _model.async->cancelTx(p->_tx.m_txId);
+        _model.getAsync()->cancelTx(pTxObject->_tx.m_txId);
     }
 }
 
-void WalletViewModel::deleteTx(int index)
+void WalletViewModel::deleteTx(TxObject* pTxObject)
 {
-    auto *p = static_cast<TxObject*>(_tx[index]);
-    if (p->canDelete())
+    if (pTxObject->canDelete())
     {
-        _model.async->deleteTx(p->_tx.m_txId);
+        _model.getAsync()->deleteTx(pTxObject->_tx.m_txId);
     }
 }
 
 void WalletViewModel::generateNewAddress()
 {
-    _newReceiverAddr = "";
+    _newReceiverAddr = {};
     _newReceiverName = "";
-    if (_model.async)
-    {
-        _model.async->generateNewWalletID();
-    }
+
+    _model.getAsync()->generateNewAddress();
 }
 
 void WalletViewModel::saveNewAddress()
 {
-    auto bytes = from_hex(_newReceiverAddr.toStdString());
-    if (bytes.size() != sizeof(WalletID))
+    _newReceiverAddr.m_label = _newReceiverName.toStdString();
+    if (_expires == 1)
     {
-        return;
+        _newReceiverAddr.m_duration = 0;
     }
-    WalletID id = bytes;
-    WalletAddress ownAddress{};
 
-    ownAddress.m_walletID = id;
-    ownAddress.m_own = true;
-    ownAddress.m_label = _newReceiverName.toStdString();
-    ownAddress.m_createTime = beam::getTimestamp();
-
-    if (_model.async)
-    {
-        _model.async->createNewAddress(std::move(ownAddress));
-    }
+    _model.getAsync()->saveAddress(_newReceiverAddr, true);
 }
 
 void WalletViewModel::copyToClipboard(const QString& text)
@@ -258,25 +281,26 @@ void WalletViewModel::onStatus(const WalletStatus& status)
         changed = true;
 
         emit actualAvailableChanged();
+        emit availableToSendAmountChanged();
     }
 
-    if (_status.received != status.received)
+    if (_status.receiving != status.receiving)
     {
-        _status.received = status.received;
+        _status.receiving = status.receiving;
 
         changed = true;
     }
 
-    if (_status.sent != status.sent)
+    if (_status.sending != status.sending)
     {
-        _status.sent = status.sent;
+        _status.sending = status.sending;
 
         changed = true;
     }
 
-    if (_status.unconfirmed != status.unconfirmed)
+    if (_status.maturing != status.maturing)
     {
-        _status.unconfirmed = status.unconfirmed;
+        _status.maturing = status.maturing;
 
         changed = true;
     }
@@ -294,56 +318,55 @@ void WalletViewModel::onStatus(const WalletStatus& status)
     }
 }
 
-void WalletViewModel::onTxStatus(const std::vector<TxDescription>& history)
+void WalletViewModel::onTxStatus(beam::ChangeAction action, const std::vector<TxDescription>& items)
 {
-    _tx.clear();
-
-    for (const auto& item : history)
+    if (action == beam::ChangeAction::Reset)
     {
-        _tx.push_back(new TxObject(item));
-    }
-
-    emit transactionsChanged();
-
-    // Get info for TxObject::_user_name (get wallets labels)
-    if (_model.async)
-    {
-        _model.async->getAddresses(false);
-    }
-}
-
-void WalletViewModel::onTxPeerUpdated(const std::vector<beam::TxPeer>& peers)
-{
-    _addrList = peers;
-}
-
-void WalletViewModel::onSyncProgressUpdated(int done, int total)
-{
-    _status.update.done = done;
-    _status.update.total = total;
-    setIsSyncInProgress(!((_status.update.done + _nodeDone) == (_status.update.total + _nodeTotal)));
-    
-    emit stateChanged();
-}
-
-void WalletViewModel::onNodeSyncProgressUpdated(int done, int total)
-{
-    _nodeDone = done;
-    _nodeTotal = total;
-    if (total > 0)
-    {
-        setNodeSyncProgress(static_cast<int>(done * 100) / total);
-    }
-    setIsSyncInProgress(!((_status.update.done + _nodeDone) == (_status.update.total + _nodeTotal)));
-    if (done == total)
-    {
-        auto& settings = AppModel::getInstance()->getSettings();
-        if (!settings.getLocalNodeSynchronized())
+        _txList.clear();
+        for (const auto& item : items)
         {
-            settings.setLocalNodeSynchronized(true);
-            settings.applyChanges();
+            _txList.push_back(new TxObject(item));
         }
     }
+    else if (action == beam::ChangeAction::Removed)
+    {
+        for (const auto& item : items)
+        {
+            auto it = find_if(_txList.begin(), _txList.end(), [&item](const auto& tx) {return item.m_txId == tx->_tx.m_txId; });
+            if (it != _txList.end())
+            {
+                _txList.erase(it);
+            }
+        }
+    }
+    else if (action == beam::ChangeAction::Updated)
+    {
+        auto txIt = _txList.begin();
+        auto txEnd = _txList.end();
+        for (const auto& item : items)
+        {
+            txIt = find_if(txIt, txEnd, [&item](const auto& tx) {return item.m_txId == tx->_tx.m_txId; });
+            if (txIt == txEnd)
+            {
+                break;
+            }
+            (*txIt)->update(item);
+        }
+    }
+    else if (action == beam::ChangeAction::Added)
+    {
+        // TODO in sort order
+        for (const auto& item : items)
+        {
+            _txList.insert(0, new TxObject(item));
+        }
+    }
+
+    sortTx();
+
+    // Get info for TxObject::_user_name (get wallets labels)
+    _model.getAsync()->getAddresses(false);
+
 }
 
 void WalletViewModel::onChangeCalculated(beam::Amount change)
@@ -364,19 +387,19 @@ QString WalletViewModel::available() const
     return BeamToString(_status.available);
 }
 
-QString WalletViewModel::received() const
+QString WalletViewModel::receiving() const
 {
-    return BeamToString(_status.received);
+    return BeamToString(_status.receiving);
 }
 
-QString WalletViewModel::sent() const
+QString WalletViewModel::sending() const
 {
-    return BeamToString(_status.sent);
+    return BeamToString(_status.sending);
 }
 
-QString WalletViewModel::unconfirmed() const
+QString WalletViewModel::maturing() const
 {
-    return BeamToString(_status.unconfirmed);
+    return BeamToString(_status.maturing);
 }
 
 QString WalletViewModel::sendAmount() const
@@ -384,9 +407,14 @@ QString WalletViewModel::sendAmount() const
     return _sendAmount;
 }
 
-QString WalletViewModel::feeMils() const
+QString WalletViewModel::getAvailableToSendAmount() const
 {
-    return _feeMils;
+    return BeamToString(_status.available - calcFeeAmount());
+}
+
+QString WalletViewModel::feeGrothes() const
+{
+    return _feeGrothes;
 }
 
 QString WalletViewModel::getReceiverAddr() const
@@ -405,19 +433,8 @@ void WalletViewModel::setReceiverAddr(const QString& value)
 }
 
 bool WalletViewModel::isValidReceiverAddress(const QString& value) {
-    return _model.check_receiver_address(value.toStdString());
+    return check_receiver_address(value.toStdString());
 }
-
-/*QString WalletViewModel::getSenderAddr() const
-{
-    return _senderAddr;
-}
-
-void WalletViewModel::setSenderAddr(const QString& value)
-{
-    _senderAddr = value;
-    emit senderAddrChanged();
-}*/
 
 void WalletViewModel::setSendAmount(const QString& value)
 {
@@ -425,30 +442,22 @@ void WalletViewModel::setSendAmount(const QString& value)
     if (trimmedValue != _sendAmount)
     {
         _sendAmount = trimmedValue;
-        _model.async->calcChange(calcTotalAmount());
+        _model.getAsync()->calcChange(calcTotalAmount());
         emit sendAmountChanged();
         emit actualAvailableChanged();
     }
 }
 
-void WalletViewModel::setFeeMils(const QString& value)
+void WalletViewModel::setFeeGrothes(const QString& value)
 {
     auto trimmedValue = value.trimmed();
-    if (trimmedValue != _feeMils)
+    if (trimmedValue != _feeGrothes)
     {
-        _feeMils = trimmedValue;
-        _model.async->calcChange(calcTotalAmount());
-        emit feeMilsChanged();
+        _feeGrothes = trimmedValue;
+        _model.getAsync()->calcChange(calcTotalAmount());
+        emit feeGrothesChanged();
         emit actualAvailableChanged();
-    }
-}
-
-void WalletViewModel::setSelectedAddr(int index)
-{
-    if (_selectedAddr != index)
-    {
-        _selectedAddr = index;
-        emit selectedAddrChanged();
+        emit availableToSendAmountChanged();
     }
 }
 
@@ -466,98 +475,94 @@ QString WalletViewModel::getComment() const
 	return _comment;
 }
 
-QString WalletViewModel::getBranchName() const
+QString WalletViewModel::sortRole() const
 {
-    if (BRANCH_NAME.empty())
-        return QString();
-
-    return QString::fromStdString(" (" + BRANCH_NAME + ")");
+    return _sortRole;
 }
 
-QString WalletViewModel::receiverAddr() const
+void WalletViewModel::setSortRole(const QString& value)
 {
-    if (_selectedAddr < 0 || _addrList.empty()) return "";
+    if (value != getDateRole() && value != getAmountRole() &&
+        value != getStatusRole() && value != getUserRole())
+        return;
 
-    stringstream str;
-    str << _addrList[_selectedAddr].m_walletID;
-    return QString::fromStdString(str.str());
+    _sortRole = value;
+    sortTx();
+}
+
+Qt::SortOrder WalletViewModel::sortOrder() const
+{
+    return _sortOrder;
+}
+
+void WalletViewModel::setSortOrder(Qt::SortOrder value)
+{
+    _sortOrder = value;
+    sortTx();
+}
+
+QString WalletViewModel::getIncomeRole() const
+{
+    return "income";
+}
+
+QString WalletViewModel::getDateRole() const
+{
+    return "date";
+}
+
+QString WalletViewModel::getUserRole() const
+{
+    return "user";
+}
+
+QString WalletViewModel::getDisplayNameRole() const
+{
+    return "displayName";
+}
+
+QString WalletViewModel::getAmountRole() const
+{
+    return "amount";
+}
+
+QString WalletViewModel::getStatusRole() const
+{
+    return "status";
+}
+
+int WalletViewModel::getDefaultFeeInGroth() const
+{
+    return kDefaultFeeInGroth;
+}
+
+void WalletViewModel::setExpires(int value)
+{
+    if (value != _expires)
+    {
+        _expires = value;
+        emit expiresChanged();
+    }
+}
+
+int WalletViewModel::getExpires() const
+{
+    return _expires;
 }
 
 QQmlListProperty<TxObject> WalletViewModel::getTransactions()
 {
-    return QQmlListProperty<TxObject>(this, _tx);
+    return QQmlListProperty<TxObject>(this, _txList);
 }
-
-QString WalletViewModel::syncTime() const
-{
-    return toString(_status.update.lastTime);
-}
-
-bool WalletViewModel::getIsOfflineStatus() const
-{
-    return _isOfflineStatus;
-}
-
-bool WalletViewModel::getIsFailedStatus() const
-{
-    return _isFailedStatus;
-}
-
-void WalletViewModel::setIsOfflineStatus(bool value)
-{
-}
-
-void WalletViewModel::setIsFailedStatus(bool value)
-{
-}
-
-QString WalletViewModel::getWalletStatusErrorMsg() const
-{
-    return QString{};
-}
-
-bool WalletViewModel::getIsSyncInProgress() const
-{
-    return _isSyncInProgress;
-}
-
-void WalletViewModel::setIsSyncInProgress(bool value)
-{
-    if (_isSyncInProgress != value)
-    {
-        _isSyncInProgress = value;
-        emit isSyncInProgressChanged();
-    }
-}
-
-int WalletViewModel::selectedAddr() const
-{
-    return _selectedAddr;
-}
-
-int WalletViewModel::getNodeSyncProgress() const
-{
-    return _nodeSyncProgress;
-}
-
-void WalletViewModel::setNodeSyncProgress(int value)
-{
-    if (_nodeSyncProgress != value)
-    {
-        _nodeSyncProgress = value;
-        emit nodeSyncProgressChanged();
-    }
-}
-
 
 beam::Amount WalletViewModel::calcSendAmount() const
 {
-	return _sendAmount.toDouble() * Rules::Coin;
+	return std::round(_sendAmount.toDouble() * Rules::Coin);
 }
 
 beam::Amount WalletViewModel::calcFeeAmount() const
 {
-    return _feeMils.toDouble() * Rules::Coin;
+    return _feeGrothes.toULongLong();
 }
 
 beam::Amount WalletViewModel::calcTotalAmount() const
@@ -565,22 +570,70 @@ beam::Amount WalletViewModel::calcTotalAmount() const
     return calcSendAmount() + calcFeeAmount();
 }
 
+void WalletViewModel::sortTx()
+{
+    auto cmp = generateComparer();
+    std::sort(_txList.begin(), _txList.end(), cmp);
+
+    emit transactionsChanged();
+}
+
+std::function<bool(const TxObject*, const TxObject*)> WalletViewModel::generateComparer()
+{
+    if (_sortRole == getIncomeRole())
+        return [sortOrder = _sortOrder](const TxObject* lf, const TxObject* rt)
+    {
+        return compareTx(lf->getTxDescription().m_sender, rt->getTxDescription().m_sender, sortOrder);
+    };
+
+    if (_sortRole == getUserRole())
+        return [sortOrder = _sortOrder](const TxObject* lf, const TxObject* rt)
+    {
+        return compareTx(lf->user(), rt->user(), sortOrder);
+    };
+
+    if (_sortRole == getDisplayNameRole())
+        return [sortOrder = _sortOrder](const TxObject* lf, const TxObject* rt)
+    {
+        return compareTx(lf->displayName(), rt->displayName(), sortOrder);
+    };
+
+    if (_sortRole == getAmountRole())
+        return [sortOrder = _sortOrder](const TxObject* lf, const TxObject* rt)
+    {
+        return compareTx(lf->getTxDescription().m_amount, rt->getTxDescription().m_amount, sortOrder);
+    };
+
+    if (_sortRole == getStatusRole())
+        return [sortOrder = _sortOrder](const TxObject* lf, const TxObject* rt)
+    {
+        return compareTx(lf->status(), rt->status(), sortOrder);
+    };
+
+    // defult for dateRole
+    return [sortOrder = _sortOrder](const TxObject* lf, const TxObject* rt)
+    {
+        return compareTx(lf->getTxDescription().m_createTime, rt->getTxDescription().m_createTime, sortOrder);
+    };
+}
+
 void WalletViewModel::sendMoney()
 {
     if (/*!_senderAddr.isEmpty() && */isValidReceiverAddress(getReceiverAddr()))
     {
-        //WalletID ownAddr = from_hex(getSenderAddr().toStdString());
-        WalletID peerAddr = from_hex(getReceiverAddr().toStdString());
+        WalletID walletID(Zero);
+
+        walletID.FromHex(getReceiverAddr().toStdString());
+
         // TODO: show 'operation in process' animation here?
-        //_model.async->sendMoney(ownAddr, peerAddr, calcSendAmount(), calcFeeAmount());
-        _model.async->sendMoney(peerAddr, _comment.toStdString(), calcSendAmount(), calcFeeAmount());
+        _model.getAsync()->sendMoney(walletID, _comment.toStdString(), calcSendAmount(), calcFeeAmount());
     }
 }
 
 void WalletViewModel::syncWithNode()
 {
     //setIsSyncInProgress(true);
-    _model.async->syncWithNode();
+    _model.getAsync()->syncWithNode();
 }
 
 QString WalletViewModel::actualAvailable() const
@@ -600,7 +653,12 @@ QString WalletViewModel::change() const
 
 QString WalletViewModel::getNewReceiverAddr() const
 {
-    return _newReceiverAddr;
+    return toString(_newReceiverAddr.m_walletID);
+}
+
+QString WalletViewModel::getNewReceiverAddrQR() const
+{
+    return _newReceiverAddrQR;
 }
 
 void WalletViewModel::setNewReceiverName(const QString& value)
@@ -618,14 +676,14 @@ QString WalletViewModel::getNewReceiverName() const
 	return _newReceiverName;
 }
 
-void WalletViewModel::onAdrresses(bool own, const std::vector<beam::WalletAddress>& addresses)
+void WalletViewModel::onAddresses(bool own, const std::vector<beam::WalletAddress>& addresses)
 {
     if (own)
     {
         return;
     }
 
-    for (auto* tx : _tx)
+    for (auto* tx : _txList)
     {
         auto foundIter = std::find_if(addresses.cbegin(), addresses.cend(),
                                       [tx](const auto& address) { return address.m_walletID == tx->peerId(); });
@@ -644,8 +702,51 @@ void WalletViewModel::onAdrresses(bool own, const std::vector<beam::WalletAddres
     }
 }
 
-void WalletViewModel::onGeneratedNewWalletID(const beam::WalletID& walletID)
+void WalletViewModel::onGeneratedNewAddress(const beam::WalletAddress& addr)
 {
-    _newReceiverAddr = toString(walletID);
+    _newReceiverAddr = addr;
+    _newReceiverAddrQR = "";
+    setExpires(0);
+
+    CQR_Encode qrEncode;
+    QString strAddr(toString(_newReceiverAddr.m_walletID));
+    bool success = qrEncode.EncodeData(1, 0, true, -1, strAddr.toUtf8().data());
+
+    if (success)
+    {
+        int qrImageSize = qrEncode.m_nSymbleSize;
+        int encodeImageSize = qrImageSize + (QR_MARGIN * 2);
+        QImage encodeImage(encodeImageSize, encodeImageSize, QImage::Format_ARGB32);
+        encodeImage.fill(Qt::transparent);
+        QColor color(Qt::white);
+
+        for (int i = 0; i < qrImageSize; i++)
+            for (int j = 0; j < qrImageSize; j++)
+                if (qrEncode.m_byModuleData[i][j])
+                    encodeImage.setPixel(i + QR_MARGIN, j + QR_MARGIN, color.rgba());
+
+        encodeImage = encodeImage.scaled(200, 200);
+
+        QByteArray bArray;
+        QBuffer buffer(&bArray);
+        buffer.open(QIODevice::WriteOnly);
+        encodeImage.save(&buffer, "png");
+
+        _newReceiverAddrQR = "data:image/png;base64,";
+        _newReceiverAddrQR.append(QString::fromLatin1(bArray.toBase64().data()));
+    }
+
     emit newReceiverAddrChanged();
+}
+
+void WalletViewModel::onSendMoneyVerified()
+{
+    // retranslate to qml
+    emit sendMoneyVerified();
+}
+
+void WalletViewModel::onCantSendToExpired()
+{
+    // retranslate to qml
+    emit cantSendToExpired();
 }

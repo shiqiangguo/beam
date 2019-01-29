@@ -27,6 +27,8 @@ namespace
         30 * msInMinute,
         60 * msInMinute,
     };
+
+    const int minResetPeriodInMs = 1000;
 }
 
 MainViewModel::MainViewModel()
@@ -54,7 +56,7 @@ void MainViewModel::onLockTimeoutChanged()
 {
     int index = m_settings.getLockTimeout();
 
-    assert(index < sizeof LockTimeouts / sizeof LockTimeouts[0]);
+    assert(static_cast<size_t>(index) < sizeof(LockTimeouts) / sizeof(LockTimeouts[0]));
 
     if (index > 0)
     {
@@ -63,5 +65,13 @@ void MainViewModel::onLockTimeoutChanged()
     else
     {
         m_timer.stop();
+    }
+}
+
+void MainViewModel::resetLockTimer()
+{
+    if (m_timer.isActive() && (m_timer.interval() - m_timer.remainingTime() > minResetPeriodInMs))
+    {
+        m_timer.start();
     }
 }

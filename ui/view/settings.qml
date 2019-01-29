@@ -1,4 +1,4 @@
-import QtQuick 2.3
+import QtQuick 2.11
 import QtQuick.Controls 1.2
 import QtQuick.Controls 2.4
 import QtQuick.Controls.Styles 1.2
@@ -9,16 +9,9 @@ import Beam.Wallet 1.0
 Rectangle {
 
     anchors.fill: parent
-    color: "#032e48"
+    color: Style.marine
 
     SettingsViewModel {id: viewModel}
-
-    ConfirmationDialog {
-        id: emergencyConfirmation
-        text: "Transaction history will be deleted. This operation can not be undone"
-        okButtonText: "reset"
-        onAccepted: viewModel.emergencyReset()
-    }
 
     ChangePasswordDialog {
         id: changePasswordDialog
@@ -27,6 +20,7 @@ Rectangle {
     }
 
     ColumnLayout {
+        id: mainColumn
         anchors.fill: parent
         anchors.bottomMargin: 30
         spacing: 20
@@ -54,265 +48,306 @@ Rectangle {
             }
         }
 
-        RowLayout {
+            
+        ScrollView {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 10
-
-            ColumnLayout {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.alignment: Qt.AlignTop
+            clip: true
+            RowLayout {
+                id: rowT
+                width: mainColumn.width
                 spacing: 10
 
-                Rectangle {
+                ColumnLayout {
                     Layout.fillWidth: true
-                    height: 150
+                    Layout.fillHeight: true
+                    Layout.alignment: Qt.AlignTop
+                    spacing: 10
 
-                    radius: 10
-                    color: Style.dark_slate_blue
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 150
 
-                    ColumnLayout {
-                        anchors.fill: parent
-                        anchors.margins: 20
-                        spacing: 5
+                        radius: 10
+                        color: Style.dark_slate_blue
 
-                        SFText {
-                            Layout.alignment: Qt.AlignTop
-                            Layout.bottomMargin: 15
-                            text: qsTr("Remote node")
-                            color: Style.white
-                            font.pixelSize: 18
-                            font.styleName: "Bold"; font.weight: Font.Bold
-                        }
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 20
+                            spacing: 5
 
-                        SFText {
-                            Layout.alignment: Qt.AlignTop
-                            text: qsTr("ip:port")
-                            color: viewModel.localNodeRun ? Style.disable_text_color : Style.white
-                            font.pixelSize: 12
-                            font.styleName: "Bold"; font.weight: Font.Bold
-                        }
-
-                        SFTextInput {
-                            id: nodeAddress
-                            Layout.fillWidth: true
-                            Layout.alignment: Qt.AlignTop
-                            focus: true
-                            activeFocusOnTab: true
-                            font.pixelSize: 12
-                            color: readOnly ? Style.disable_text_color : Style.white
-                            readOnly: viewModel.localNodeRun
-                            validator: RegExpValidator { regExp: /^(\s|\x180E)*(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(:([0-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(\s|\x180E)*$/ }
-                            text: viewModel.nodeAddress
-                            Binding {
-                                target: viewModel
-                                property: "nodeAddress"
-                                value: nodeAddress.text.trim()
-                            }
-                        }
-
-                        Item {
-                            Layout.minimumHeight: 12
                             SFText {
                                 Layout.alignment: Qt.AlignTop
-                                id: nodeAddressError
-                                color: Style.validator_color
-                                font.pixelSize: 10
-                                visible: !nodeAddress.acceptableInput
-                                text: "Invalid address"
+                                Layout.bottomMargin: 15
+                                text: qsTr("Remote node")
+                                color: Style.white
+                                font.pixelSize: 18
+                                font.styleName: "Bold"; font.weight: Font.Bold
+                            }
+
+                            SFText {
+                                Layout.alignment: Qt.AlignTop
+                                text: qsTr("ip:port")
+                                color: localNodeRun.checked ? Style.disable_text_color : Style.white
+                                font.pixelSize: 12
+                                font.styleName: "Bold"; font.weight: Font.Bold
+                            }
+
+                            SFTextInput {
+                                id: nodeAddress
+                                Layout.fillWidth: true
+                                Layout.alignment: Qt.AlignTop
+                                focus: true
+                                activeFocusOnTab: true
+                                font.pixelSize: 12
+                                color: readOnly ? Style.disable_text_color : Style.white
+                                readOnly: localNodeRun.checked
+                                validator: RegExpValidator { regExp: /^(\s|\x180E)*((([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])|([\w.-]+(?:\.[\w\.-]+)+))(:([0-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(\s|\x180E)*$/ }
+                                text: viewModel.nodeAddress
+                                Binding {
+                                    target: viewModel
+                                    property: "nodeAddress"
+                                    value: nodeAddress.text.trim()
+                                }
+                            }
+
+                            Item {
+                                Layout.minimumHeight: 12
+                                SFText {
+                                    Layout.alignment: Qt.AlignTop
+                                    id: nodeAddressError
+                                    color: Style.validator_color
+                                    font.pixelSize: 10
+                                    visible: !nodeAddress.acceptableInput
+                                    text: "Invalid address"
+                                }
                             }
                         }
                     }
-                }
 
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.alignment: Qt.AlignTop
-                    height: 360
-                    radius: 10
-                    color: Style.dark_slate_blue
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.alignment: Qt.AlignTop
+                        height: 320
+                        radius: 10
+                        color: Style.dark_slate_blue
 
-                    ColumnLayout {
-                        anchors.fill: parent
-                        anchors.margins: 20
-                        enabled: viewModel.localNodeRun
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 20
 
-                        SFText {
-                            text: qsTr("Local node")
-                            color: viewModel.localNodeRun ? Style.white : Style.disable_text_color
-                            font.pixelSize: 18
-                            font.styleName: "Bold"; font.weight: Font.Bold
-                        }
+                            SFText {
+                                text: qsTr("Local node")
+                                color: Style.white
+                                font.pixelSize: 18
+                                font.styleName: "Bold"; font.weight: Font.Bold
+                            }
 
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Layout.alignment: Qt.AlignTop
-                            spacing: 30
-
-                            ColumnLayout {
+                            RowLayout {
                                 Layout.fillWidth: true
                                 Layout.alignment: Qt.AlignTop
-                                spacing: 10
+                                spacing: 30
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    Layout.alignment: Qt.AlignTop
+                                    spacing: 10
                                 
 
-                              /*  CustomSwitch {
-                                    id: localNodeRun
-                                    text: qsTr("Run local node")
-                                    font.pixelSize: 12
-                                    width: parent.width
-                                    checked: viewModel.localNodeRun
-                                    Binding {
-                                        target: viewModel
-                                        property: "localNodeRun"
-                                        value: localNodeRun.checked
+                                    CustomSwitch {
+                                        id: localNodeRun
+                                        text: qsTr("Run local node")
+                                        font.pixelSize: 12
+                                        width: parent.width
+                                        checked: viewModel.localNodeRun
+                                        Binding {
+                                            target: viewModel
+                                            property: "localNodeRun"
+                                            value: localNodeRun.checked
+                                        }
+                                    }
+
+                                    SFText {
+                                        text: qsTr("Mining threads (CPU)")
+                                        color: (localNodeRun.checked && !useGpu.checked) ? Style.white : Style.disable_text_color
+                                        font.pixelSize: 12
+                                        font.styleName: "Bold"; font.weight: Font.Bold
+                                    }
+
+                                    FeeSlider {
+                                        id: localNodeMiningThreads
+                                        precision: 0
+                                        showTicks: true
+                                        Layout.fillWidth: true
+                                        value: viewModel.localNodeMiningThreads
+                                        to: {viewModel.coreAmount()}
+                                        stepSize: 1
+                                        enabled: localNodeRun.checked && !useGpu.checked
+                                        Binding {
+                                            target: viewModel
+                                            property: "localNodeMiningThreads"
+                                            value: localNodeMiningThreads.value
+                                        }
+                                    }
+
+                                    CustomSwitch {
+                                        id: useGpu
+                                        text: qsTr("Use GPU")
+                                        Layout.topMargin: 5
+                                        font.pixelSize: 12
+                                        width: parent.width
+                                        checked: viewModel.useGpu
+                                        enabled: localNodeRun.checked && viewModel.hasSupportedGpu()
+                                        visible: viewModel.showUseGpu()
+                                        Binding {
+                                            target: viewModel
+                                            property: "useGpu"
+                                            value: useGpu.checked
+                                        }
+                                    }
+                                    SFText {
+                                        id: gpuError
+                                        color: Style.validator_color
+                                        font.pixelSize: 14
+                                        visible: viewModel.showUseGpu() && !viewModel.hasSupportedGpu()
+                                        text: qsTr("You have unsupported videocard")
+                                    }
+
+                                    ListView {
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        Layout.minimumWidth: 140
+                                        visible: viewModel.showUseGpu() && viewModel.hasSupportedGpu()
+                                        enabled: useGpu.checked
+                                        model: viewModel.supportedDevices
+                                        clip: true
+                                        delegate: RowLayout {
+                                            width: parent.width
+                                            height: 22
+
+                                            CustomCheckBox {
+                                                id: device_id
+                                                font.pixelSize: 12
+                                                enabled: localNodeRun.checked
+                                                palette.windowText: enabled ? Style.white : Style.disable_text_color
+                                                checked: modelData.enabled
+                                                text: modelData.name
+                                                onToggled: {
+                                                    viewModel.propertiesChanged();
+                                                }
+                                                Binding {
+                                                    target: modelData
+                                                    property: "enabled"
+                                                    value: device_id.checked
+                                                }
+                                            }
+                                        }
                                     }
                                 }
-                        */
-
-                                SFText {
-                                    text: qsTr("Local node port")
-                                    color: viewModel.localNodeRun ? Style.white : Style.disable_text_color
-                                    font.pixelSize: 12
-                                    font.styleName: "Bold"; font.weight: Font.Bold
-                                }
-
-                                SFTextInput {
-                                    id: localNodePort
-                                    width: parent.width
-                                    activeFocusOnTab: true
-                                    font.pixelSize: 12
-                                    color: readOnly ? Style.disable_text_color : Style.white
-                                    readOnly: !viewModel.localNodeRun
-                                    text: viewModel.localNodePort
-                                    validator: IntValidator {
-                                        bottom: 0
-                                        top: 65535
-                                    }
-                                    Binding {
-                                        target: viewModel
-                                        property: "localNodePort"
-                                        value: localNodePort.text
-                                    }
-                                }
-
-                                SFText {
-                                    text: qsTr("Mining threads")
-                                    color: viewModel.localNodeRun ? Style.white : Style.disable_text_color
-                                    font.pixelSize: 12
-                                    font.styleName: "Bold"; font.weight: Font.Bold
-                                }
-
-                                FeeSlider {
-                                    id: localNodeMiningThreads
-                                    precision: 0
-                                    showTicks: true
+                                ColumnLayout {
                                     Layout.fillWidth: true
-                                    value: viewModel.localNodeMiningThreads
-                                    to: {viewModel.coreAmount()}
-                                    stepSize: 1
-                                    enabled: viewModel.localNodeRun
-                                    Binding {
-                                        target: viewModel
-                                        property: "localNodeMiningThreads"
-                                        value: localNodeMiningThreads.value
-                                    }
-                                }
-
-                                SFText {
-                                    text: qsTr("Verification threads")
-                                    color: viewModel.localNodeRun ? Style.white : Style.disable_text_color
-                                    font.pixelSize: 12
-                                    font.styleName: "Bold"; font.weight: Font.Bold
-                                }
-
-                                FeeSlider {
-                                    id: localNodeVerificationThreads
-                                    precision: 0
-                                    showTicks: true
-                                    Layout.fillWidth: true
-                                    value: viewModel.localNodeVerificationThreads
-                                    to: {viewModel.coreAmount()}
-                                    stepSize: 1
-                                    enabled: viewModel.localNodeRun
-                                    Binding {
-                                        target: viewModel
-                                        property: "localNodeVerificationThreads"
-                                        value: localNodeVerificationThreads.value
-                                    }
-                                }
-                            }
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                Layout.alignment: Qt.AlignTop
-                                spacing: 10
-
-                                SFText {
-                                    text: qsTr("Peers")
-                                    color: viewModel.localNodeRun ? Style.white : Style.disable_text_color
-                                    font.pixelSize: 12
-                                    font.styleName: "Bold"; font.weight: Font.Bold
-                                }
-
-                                RowLayout {
-                                    Layout.fillWidth: true
+                                    Layout.alignment: Qt.AlignTop
                                     spacing: 10
 
+                                    SFText {
+                                        text: qsTr("Local node port")
+                                        color: localNodeRun.checked ? Style.white : Style.disable_text_color
+                                        font.pixelSize: 12
+                                        font.styleName: "Bold"; font.weight: Font.Bold
+                                    }
+
                                     SFTextInput {
-                                        Layout.fillWidth: true
-                                        id: newLocalNodePeer
+                                        id: localNodePort
                                         width: parent.width
                                         activeFocusOnTab: true
                                         font.pixelSize: 12
                                         color: readOnly ? Style.disable_text_color : Style.white
-                                        readOnly: !viewModel.localNodeRun
-                                        validator: RegExpValidator { regExp: /^(\s|\x180E)*(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(:([0-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(\s|\x180E)*$/ }
-                                    }
-                                    
-                                    PrimaryButton {
-                                        Layout.fillWidth: true
-                                        Layout.minimumHeight: 20
-                                        Layout.minimumWidth: 60
-				                        text: "Add"
-                                        palette.button: "#708090"
-                                        palette.buttonText : viewModel.localNodeRun ? Style.white : Style.disable_text_color
-                                        enabled: newLocalNodePeer.acceptableInput && viewModel.localNodeRun
-                                        onClicked: {
-                                            viewModel.addLocalNodePeer(newLocalNodePeer.text.trim());
-                                            newLocalNodePeer.clear();
+                                        readOnly: !localNodeRun.checked
+                                        text: viewModel.localNodePort
+                                        validator: IntValidator {
+                                            bottom: 0
+                                            top: 65535
+                                        }
+                                        Binding {
+                                            target: viewModel
+                                            property: "localNodePort"
+                                            value: localNodePort.text
                                         }
                                     }
-                                }
 
-                                ListView {
-                                    Layout.fillWidth: true
-                                    Layout.fillHeight: true
-                                    Layout.minimumWidth: 140
-                                    model: viewModel.localNodePeers
-                                    clip: true
-                                    delegate: RowLayout {
+                                    SFText {
+                                        Layout.topMargin: 10
+                                        text: qsTr("Peers")
+                                        color: localNodeRun.checked ? Style.white : Style.disable_text_color
+                                        font.pixelSize: 12
+                                        font.styleName: "Bold"; font.weight: Font.Bold
+                                    }
+
+                                    RowLayout {
                                         Layout.fillWidth: true
-                                        height: 30
-                                        SFText {
+                                        spacing: 10
+
+                                        SFTextInput {
                                             Layout.fillWidth: true
-                                            Layout.alignment: Qt.AlignVCenter
-                                            text: modelData
+                                            id: newLocalNodePeer
+                                            width: parent.width
+                                            activeFocusOnTab: true
                                             font.pixelSize: 12
-                                            color: viewModel.localNodeRun ? Style.white : Style.disable_text_color
-                                            height: 16
-                                            elide: Text.ElideRight
+                                            color: readOnly ? Style.disable_text_color : Style.white
+                                            readOnly: !localNodeRun.checked
+                                            validator: RegExpValidator { regExp: /^(\s|\x180E)*((([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])|([\w.-]+(?:\.[\w\.-]+)+))(:([0-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(\s|\x180E)*$/ }
                                         }
-                                        Item {
-                                            Layout.fillWidth: true
-                                        }
+                                    
                                         CustomButton {
-                                            Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
-                                            Layout.minimumHeight: 20
-                                            Layout.minimumWidth: 20
-                                            textOpacity: 0
-                                            icon.source: "qrc:///assets/icon-delete.svg"
-                                            enabled: viewModel.localNodeRun
-                                            onClicked: viewModel.deleteLocalNodePeer(index)
+                                            Layout.fillWidth: true
+                                            Layout.minimumWidth: 70
+                                            leftPadding: 20
+                                            rightPadding: 20
+				                            text: "Add"
+                                            palette.button: "#708090"
+                                            palette.buttonText : localNodeRun.checked ? Style.white : Style.disable_text_color
+                                            enabled: newLocalNodePeer.acceptableInput && localNodeRun.checked
+                                            onClicked: {
+                                                viewModel.addLocalNodePeer(newLocalNodePeer.text.trim());
+                                                newLocalNodePeer.clear();
+                                            }
+                                        }
+                                    }
+
+                                    ListView {
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        Layout.minimumWidth: 140
+                                        model: viewModel.localNodePeers
+                                        clip: true
+                                        delegate: RowLayout {
+                                            width: parent.width
+                                            height: 36
+
+                                            SFText {
+                                                Layout.fillWidth: true
+                                                Layout.alignment: Qt.AlignVCenter
+                                                text: modelData
+                                                font.pixelSize: 12
+                                                color: Style.white
+                                                height: 16
+                                                elide: Text.ElideRight
+                                            }
+
+                                            CustomButton {
+                                                Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
+                                                Layout.minimumHeight: 20
+                                                Layout.minimumWidth: 20
+                                                shadowRadius: 5
+                                                shadowSamples: 7
+                                                Layout.margins: shadowRadius
+                                                leftPadding: 5
+                                                rightPadding: 5
+                                                textOpacity: 0
+                                                icon.source: "qrc:/assets/icon-delete.svg"
+                                                enabled: localNodeRun.checked
+                                                onClicked: viewModel.deleteLocalNodePeer(index)
+                                            }
                                         }
                                     }
                                 }
@@ -320,216 +355,234 @@ Rectangle {
                         }
                     }
                 }
-            }
 
-            ColumnLayout {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                Layout.alignment: Qt.AlignTop
-                spacing: 10
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 150
-
-                    radius: 10
-                    color: Style.dark_slate_blue
-
-                    ColumnLayout {
-                        anchors.fill: parent
-                        anchors.margins: 20
-                        spacing: 10
-
-                        SFText {
-                            text: qsTr("Reset wallet data")
-                            color: Style.white
-                            font.pixelSize: 18
-                            font.styleName: "Bold"; font.weight: Font.Bold
-                        }
-
-                        SFText {
-                            Layout.fillWidth: true
-                            text: qsTr("Clear all local data and retrieve most updated information from blockchain. Transaction history will be deleted.")
-                            color: Style.white
-                            font.pixelSize: 12
-                            font.styleName: "Bold"; font.weight: Font.Bold
-                            wrapMode: Text.WordWrap
-                        }
-
-                        PrimaryButton {
-                            Layout.minimumHeight: 38
-                            Layout.minimumWidth: 198
-                            text: "reset local data"
-                            palette.button: "#708090"
-                            palette.buttonText : "white"
-                            icon.source: "qrc:///assets/icon-reset.svg"
-                            icon.width: 16
-                            icon.height: 16
-                            onClicked: emergencyConfirmation.open();
-                        }
+                ConfirmationDialog {
+                    id: confirmRefreshDialog
+                    property bool canRefresh: true
+                    okButtonText: qsTr("yes")
+                    okButtonIconSource: "qrc:/assets/icon-done.svg"
+                    cancelVisible: false
+                    width: 460
+                    text: qsTr("Rescan will update transaction and UTXO data in your wallet and get latest information from the blockchain. Are you sure?")
+                    onAccepted: {
+                        canRefresh = false;
+                        viewModel.refreshWallet();
                     }
                 }
 
-                Rectangle {
+                ColumnLayout {
                     Layout.fillWidth: true
-                    height: 210
-                    radius: 10
-                    color: Style.dark_slate_blue
+                    Layout.fillHeight: true
+                    Layout.alignment: Qt.AlignTop
+                    spacing: 10
 
-                    ColumnLayout {
-                        anchors.fill: parent
-                        anchors.margins: 20
-                        spacing: 10
+                    Rectangle {
+                        Layout.fillWidth: true
+                        radius: 10
+                        color: Style.dark_slate_blue
+                        //height: childrenRect.height + 40
+                        height: 150
 
-                        SFText {
-                            text: qsTr("Report problem")
-                            color: Style.white
-                            font.pixelSize: 18
-                            font.styleName: "Bold"; font.weight: Font.Bold
-                        }
-
-                        ColumnLayout {
-                            SFText {
-                                Layout.fillWidth: true
-                                text: qsTr("To report a problem:")
-                                color: Style.white
-                                font.pixelSize: 12
-                                font.styleName: "Bold"; font.weight: Font.Bold
-                                wrapMode: Text.WordWrap
-                            }
-
-                            SFText {
-                                Layout.fillWidth: true
-                                text: qsTr("1. Click 'Save wallet logs' and choose a destination folder for log archive")
-                                color: Style.white
-                                font.pixelSize: 12
-                                font.styleName: "Bold"; font.weight: Font.Bold
-                                wrapMode: Text.WordWrap
-                            }
-
-                            SFText {
-                                Layout.fillWidth: true
-                                text: qsTr("<style>a:link {color: '#00f6d2'}</style>2. Send email to <a href='mailto:testnet@beam-mw.com'>testnet@beam-mw.com</a> or open a ticket in <a href='https://github.com/beam-mw/beam'>github</a>")
-                                color: Style.white
-                                textFormat: Text.RichText
-                                font.pixelSize: 12
-                                font.styleName: "Bold"; font.weight: Font.Bold
-                                wrapMode: Text.WordWrap
-                                onLinkActivated: Qt.openUrlExternally(link)
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    acceptedButtons: Qt.NoButton
-                                    cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                }
-                            }
-
-                            SFText {
-                                Layout.fillWidth: true
-                                text: qsTr("3. Don't forget to attach logs archive")
-                                color: Style.white
-                                font.pixelSize: 12
-                                font.styleName: "Bold"; font.weight: Font.Bold
-                                wrapMode: Text.WordWrap
-                            }
-                        }                        
-
-                        CustomButton {
-                            Layout.minimumHeight: 38
-                            Layout.minimumWidth: 150
-
-                            text: "save wallet logs"
-                            palette.buttonText : "white"
-                            palette.button: "#708090"
-                            onClicked: viewModel.reportProblem()
-                        }
-                    }
-
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    radius: 10
-                    color: Style.dark_slate_blue
-                    height: childrenRect.height + 40
-
-                    Column {
-                        anchors.top: parent.top
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.margins: 20
-                        spacing: 10
-
-                        SFText {
-                            text: qsTr("General settings")
-                            color: Style.white
-                            font.pixelSize: 18
-                            font.styleName: "Bold"; font.weight: Font.Bold
-                        }
-
-                        Row {
-                            width: parent.width
-
+                        Column {
+                            anchors.top: parent.top
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.margins: 20
                             spacing: 10
 
                             SFText {
-                                text: qsTr("Lock screen in")
+                                text: qsTr("General settings")
                                 color: Style.white
-                                font.pixelSize: 12
+                                font.pixelSize: 18
+                                font.styleName: "Bold"; font.weight: Font.Bold
                             }
 
-                            CustomComboBox {
-                                id: lockTimeoutControl
-                                width: 100
-                                height: 20
-                                anchors.top: parent.top
-                                anchors.topMargin: -3
+                            Row {
+                                width: parent.width
 
-                                currentIndex: viewModel.lockTimeout
+                                spacing: 10
 
-                                Binding {
-                                    target: viewModel
-                                    property: "lockTimeout"
-                                    value: lockTimeoutControl.currentIndex
+                                SFText {
+                                    text: qsTr("Lock screen in")
+                                    color: Style.white
+                                    font.pixelSize: 12
                                 }
 
-                                model: ["never", "1 minute", "5 minutes", "15 minutes", "30 minutes", "1 hour"]
-                            }                            
-                        }
+                                CustomComboBox {
+                                    id: lockTimeoutControl
+                                    width: 100
+                                    height: 20
+                                    anchors.top: parent.top
+                                    anchors.topMargin: -3
+
+                                    currentIndex: viewModel.lockTimeout
+
+                                    Binding {
+                                        target: viewModel
+                                        property: "lockTimeout"
+                                        value: lockTimeoutControl.currentIndex
+                                    }
+
+                                    model: ["never", "1 minute", "5 minutes", "15 minutes", "30 minutes", "1 hour"]
+                                }
+                            }
 
 
-                        CustomButton {
-                            width: 244
-
-                            text: "change wallet password"
-                            palette.buttonText : "white"
-                            palette.button: "#708090"
-                            icon.source: "qrc:///assets/icon-password.svg"
-                            icon.width: 16
-                            icon.height: 16
-                            onClicked: changePasswordDialog.open()
+                            CustomButton {
+                                text: "change wallet password"
+                                palette.buttonText : "white"
+                                palette.button: "#708090"
+                                icon.source: "qrc:/assets/icon-password.svg"
+                                icon.width: 16
+                                icon.height: 16
+                                onClicked: changePasswordDialog.open()
+                            }
                         }
                     }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 320
+                        radius: 10
+                        color: Style.dark_slate_blue
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 20
+                            spacing: 10
+
+                            SFText {
+                                text: qsTr("Report problem")
+                                color: Style.white
+                                font.pixelSize: 18
+                                font.styleName: "Bold"; font.weight: Font.Bold
+                            }
+
+                            ColumnLayout {
+                                SFText {
+                                    Layout.fillWidth: true
+                                    text: qsTr("To report a problem:")
+                                    color: Style.white
+                                    font.pixelSize: 12
+                                    font.styleName: "Bold"; font.weight: Font.Bold
+                                    wrapMode: Text.WordWrap
+                                }
+
+                                SFText {
+                                    Layout.fillWidth: true
+                                    text: qsTr("1. Click 'Save wallet logs' and choose a destination folder for log archive")
+                                    color: Style.white
+                                    font.pixelSize: 12
+                                    font.styleName: "Bold"; font.weight: Font.Bold
+                                    wrapMode: Text.WordWrap
+                                }
+
+                                SFText {
+                                    Layout.fillWidth: true
+                                    text: qsTr("<style>a:link {color: '#00f6d2'}</style>2. Send email to <a href='mailto:support@beam.mw'>support@beam.mw</a> or open a ticket in <a href='https://github.com/beam-mw/beam'>github</a>")
+                                    color: Style.white
+                                    textFormat: Text.RichText
+                                    font.pixelSize: 12
+                                    font.styleName: "Bold"; font.weight: Font.Bold
+                                    wrapMode: Text.WordWrap
+                                    onLinkActivated: Qt.openUrlExternally(link)
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        acceptedButtons: Qt.NoButton
+                                        cursorShape: parent.hoveredLink ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                    }
+                                }
+
+                                SFText {
+                                    Layout.fillWidth: true
+                                    text: qsTr("3. Don't forget to attach logs archive")
+                                    color: Style.white
+                                    font.pixelSize: 12
+                                    font.styleName: "Bold"; font.weight: Font.Bold
+                                    wrapMode: Text.WordWrap
+                                }
+                            }                        
+                            RowLayout {
+                                Layout.fillWidth: true
+                                CustomButton {
+                                    text: "save wallet logs"
+                                    palette.buttonText : "white"
+                                    palette.button: "#708090"
+                                    onClicked: viewModel.reportProblem()
+                                }
+                                spacing: 30
+                                CustomButton {
+                                    icon.source: "qrc:/assets/icon-restore.svg"
+                                    Layout.alignment: Qt.AlignRight
+				                    text: qsTr("rescan")
+                                    palette.button: "#708090"
+                                    palette.buttonText : localNodeRun.checked ? Style.white : Style.disable_text_color
+                                    enabled: localNodeRun.checked && confirmRefreshDialog.canRefresh && viewModel.isLocalNodeRunning
+                                    onClicked: {
+                                        confirmRefreshDialog.open();
+                                    }
+                                }
+                            }
+
+                            SFText {
+                                Layout.topMargin: 20
+                                Layout.fillWidth: true
+                                Layout.minimumHeight: 20
+                                text: qsTr("Wallet folder location:")
+                                color: Style.white
+                                font.pixelSize: 18
+                                font.styleName: "Bold"; font.weight: Font.Bold
+                                wrapMode: Text.WordWrap
+                            }
+
+                            SFTextInput {
+                                Layout.fillWidth: true
+                                
+                                font.pixelSize: 14
+                                color: Style.disable_text_color
+                                readOnly: true
+                                activeFocusOnTab: false
+                                text: viewModel.walletLocation
+                            }
+                            CustomButton {
+                                text: qsTr("copy")
+                                icon.color: Style.white
+                                palette.buttonText : Style.white
+                                palette.button: "#708090"
+                                icon.source: "qrc:/assets/icon-copy.svg"
+                                onClicked: {
+                                    viewModel.copyToClipboard(viewModel.walletLocation);
+                                }
+                            }
+                            Item {
+                                Layout.fillHeight: true;
+                            }
+                        }
+
+                    }
+
+                
+                }
+
+                Item {
+                    Layout.fillHeight: true
                 }
             }
-
-            Item {
-                Layout.fillHeight: true
-            }
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            ScrollBar.vertical.policy: ScrollBar.AsNeeded
         }
 
         Row {
             Layout.alignment: Qt.AlignHCenter
             spacing: 30
-
             PrimaryButton {
                 text: qsTr("undo changes")
                 enabled: {
                     viewModel.isChanged 
                     && nodeAddress.acceptableInput
                     && localNodePort.acceptableInput
-                    /*&& localNodeMiningThreads.acceptableInput
-                    && localNodeVerificationThreads.acceptableInput*/}
+                }
                 onClicked: viewModel.undoChanges()
             }
 
@@ -539,8 +592,7 @@ Rectangle {
                     viewModel.isChanged 
                     && nodeAddress.acceptableInput
                     && localNodePort.acceptableInput
-                    /*&& localNodeMiningThreads.acceptableInput
-                    && localNodeVerificationThreads.acceptableInput*/}
+                }
                 onClicked: viewModel.applyChanges()
             }
         }

@@ -63,13 +63,13 @@ public:
 	class CursorBase
 	{
 	protected:
-		uint32_t m_nBits;
-		uint32_t m_nPtrs;
-		uint32_t m_nPosInLastNode;
+		uint16_t m_nBits;
+		uint16_t m_nPtrs;
+		uint16_t m_nPosInLastNode;
 
 		Node** const m_pp;
 
-		static uint8_t get_BitRawStat(const uint8_t* p0, uint32_t nBit);
+		static uint8_t get_BitRawStat(const uint8_t* p0, uint16_t nBit);
 
 		uint8_t get_BitRaw(const uint8_t* p0) const;
 		uint8_t get_Bit(const uint8_t* p0) const;
@@ -80,13 +80,13 @@ public:
 		CursorBase(Node** pp) :m_pp(pp) {}
 
 		Leaf& get_Leaf() const;
-		void Invalidate();
+		void InvalidateElement();
 
 		Node** get_pp() const { return m_pp; }
-		uint32_t get_Depth() const { return m_nPtrs; }
+		uint16_t get_Depth() const { return m_nPtrs; }
 	};
 
-	template <uint32_t nKeyBits>
+	template <uint16_t nKeyBits>
 	class Cursor_T :public CursorBase
 	{
 		Node* m_ppBuf[nKeyBits + 1];
@@ -94,9 +94,9 @@ public:
 		Cursor_T() :CursorBase(m_ppBuf) {}
 	};
 
-	bool Goto(CursorBase& cu, const uint8_t* pKey, uint32_t nBits) const;
+	bool Goto(CursorBase& cu, const uint8_t* pKey, uint16_t nBits) const;
 
-	Leaf* Find(CursorBase& cu, const uint8_t* pKey, uint32_t nBits, bool& bCreate);
+	Leaf* Find(CursorBase& cu, const uint8_t* pKey, uint16_t nBits, bool& bCreate);
 
 	void Delete(CursorBase& cu);
 
@@ -128,8 +128,8 @@ private:
 	void ReplaceTip(CursorBase& cu, Node* pNew);
 	bool Traverse(const Node&, ITraveler&) const;
 
-	static int Cmp(const uint8_t* pKey, const uint8_t* pThreshold, uint32_t n0, uint32_t dn);
-	static int Cmp1(uint8_t, const uint8_t* pThreshold, uint32_t n0);
+	static int Cmp(const uint8_t* pKey, const uint8_t* pThreshold, uint16_t n0, uint16_t dn);
+	static int Cmp1(uint8_t, const uint8_t* pThreshold, uint16_t n0);
 };
 
 class RadixHashTree
@@ -147,7 +147,7 @@ public:
 protected:
 	// RadixTree
 	virtual Joint* CreateJoint() override { return new MyJoint; }
-	virtual void DeleteJoint(Joint* p) override { delete (MyJoint*) p; }
+	virtual void DeleteJoint(Joint* p) override { delete Cast::Up<MyJoint>(p); }
 
 	const Merkle::Hash& get_Hash(Node&, Merkle::Hash&);
 
@@ -171,16 +171,16 @@ public:
 	MyLeaf* Find(CursorBase& cu, const Merkle::Hash& key, bool& bCreate)
 	{
 		static_assert(Merkle::Hash::nBits == ECC::nBits, "");
-		return (MyLeaf*) RadixTree::Find(cu, key.m_pData, ECC::nBits, bCreate);
+		return Cast::Up<MyLeaf>(RadixTree::Find(cu, key.m_pData, ECC::nBits, bCreate));
 	}
 
 	~RadixHashOnlyTree() { Clear(); }
 
 protected:
 	virtual Leaf* CreateLeaf() override { return new MyLeaf; }
-	virtual uint8_t* GetLeafKey(const Leaf& x) const override { return ((MyLeaf&) x).m_Hash.m_pData; }
-	virtual void DeleteLeaf(Leaf* p) override { delete (MyLeaf*) p; }
-	virtual const Merkle::Hash& get_LeafHash(Node& n, Merkle::Hash&) override { return ((MyLeaf&) n).m_Hash; }
+	virtual uint8_t* GetLeafKey(const Leaf& x) const override { return Cast::Up<MyLeaf>(Cast::NotConst(x)).m_Hash.m_pData; }
+	virtual void DeleteLeaf(Leaf* p) override { delete Cast::Up<MyLeaf>(p); }
+	virtual const Merkle::Hash& get_LeafHash(Node& n, Merkle::Hash&) override { return Cast::Up<MyLeaf>(n).m_Hash; }
 };
 
 
@@ -195,7 +195,7 @@ public:
 
 	struct Key
 	{
-		static const uint32_t s_BitsCommitment = ECC::uintBig::nBits + 1; // curve point
+		static const uint16_t s_BitsCommitment = ECC::uintBig::nBits + 1; // curve point
 
 		struct Data {
 			ECC::Point m_Commitment;
@@ -203,8 +203,8 @@ public:
 			Data& operator = (const Key&);
 		};
 
-		static const uint32_t s_Bits = s_BitsCommitment + sizeof(Height) * 8; // maturity
-		static const uint32_t s_Bytes = (s_Bits + 7) >> 3;
+		static const uint16_t s_Bits = s_BitsCommitment + sizeof(Height) * 8; // maturity
+		static const uint16_t s_Bytes = (s_Bits + 7) >> 3;
 
 		Key& operator = (const Data&);
 
@@ -230,7 +230,7 @@ public:
 
 	MyLeaf* Find(CursorBase& cu, const Key& key, bool& bCreate)
 	{
-		return (MyLeaf*) RadixTree::Find(cu, key.m_pArr, key.s_Bits, bCreate);
+		return Cast::Up<MyLeaf>(RadixTree::Find(cu, key.m_pArr, key.s_Bits, bCreate));
 	}
 
 	~UtxoTree() { Clear(); }
@@ -254,8 +254,8 @@ public:
 
 protected:
 	virtual Leaf* CreateLeaf() override { return new MyLeaf; }
-	virtual uint8_t* GetLeafKey(const Leaf& x) const override { return ((MyLeaf&) x).m_Key.m_pArr; }
-	virtual void DeleteLeaf(Leaf* p) override { delete (MyLeaf*) p; }
+	virtual uint8_t* GetLeafKey(const Leaf& x) const override { return Cast::Up<MyLeaf>(Cast::NotConst(x)).m_Key.m_pArr; }
+	virtual void DeleteLeaf(Leaf* p) override { delete Cast::Up<MyLeaf>(p); }
 	virtual const Merkle::Hash& get_LeafHash(Node&, Merkle::Hash&) override;
 
 	struct ISerializer {

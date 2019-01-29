@@ -1,15 +1,19 @@
 import QtQuick 2.11
 import QtQuick.Controls 2.3
+import QtQuick.Layouts 1.0
 import "."
 
 Dialog {
     id: control
     property alias text: messageText.text
     property alias okButtonText: okButton.text
+    property alias okButtonIconSource: okButton.icon.source
+    property alias okButtonColor: okButton.palette.button
+    property alias cancelVisible : cancelButton.visible
+    property alias cancelButtonIconSource: cancelButton.icon.source
 
     modal: true
-    //width: 520
-    //height: childRect.height
+
     x: (parent.width - width) / 2
     y: (parent.height - height) / 2
     visible: false
@@ -17,48 +21,61 @@ Dialog {
     background: Rectangle {
         radius: 10
         color: Style.dark_slate_blue
-        anchors.fill: parent            
+        anchors.fill: parent
     }
 
-    contentItem: SFText {
+    SFText {
         id: messageText
-        padding: 30
-        bottomPadding: 15
+        anchors.fill: parent
+        padding: 20
         font.pixelSize: 14
         color: Style.white
         wrapMode: Text.Wrap
         horizontalAlignment : Text.AlignHCenter
     }
 
-    footer: DialogButtonBox {
-        alignment: Qt.AlignHCenter
-        spacing: 30
-        padding: 30
-        topPadding: 15
+    footer: Control {
+        
         background: Rectangle {
             radius: 10
             color: Style.dark_slate_blue
-            anchors.fill: parent            
-        }
-            
-        CustomButton {
-            id: okButton
-            palette.button: Style.bright_teal
-            height: 38
-            width: 122
-            text: qsTr("delete")
-            palette.buttonText: Style.marine
-            DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
-        }
+            anchors.fill: parent
+        }          
 
-        CustomButton {
-            id: cancelButton
-            palette.buttonText: Style.white
-            height: 38
-            width: 122
-            focus: true
-            text: qsTr("cancel")
-            DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+        contentItem: RowLayout {
+            Item {
+                Layout.fillWidth: true
+            }
+            Row {
+                spacing: 20
+                height: 40
+                leftPadding: 30
+                rightPadding: 30
+                bottomPadding: 30
+                CustomButton {
+                    id: cancelButton
+                    focus: true
+                    text: qsTr("cancel")
+                    onClicked: { 
+                        rejected();
+                        close();
+                    }
+                }
+
+                CustomButton {
+                    id: okButton
+                    palette.button: Style.bright_teal
+                    text: qsTr("delete")
+                    palette.buttonText: Style.marine
+                    onClicked: {
+                        accepted();
+                        close();
+                    }
+                }
+            }
+            Item {
+                Layout.fillWidth: true
+            }
         }
     }
 

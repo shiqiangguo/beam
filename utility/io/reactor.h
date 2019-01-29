@@ -26,6 +26,10 @@ namespace beam { namespace io {
 
 class TcpStream;
 class CoarseTimer;
+class TcpConnectors;
+class TcpShutdowns;
+class PendingWrites;
+class SslStream;
 
 class Reactor : public std::enable_shared_from_this<Reactor> {
 public:
@@ -49,7 +53,14 @@ public:
 
     using ConnectCallback = std::function<void(uint64_t tag, std::unique_ptr<TcpStream>&& newStream, ErrorCode errorCode)>;
 
-    Result tcp_connect(Address address, uint64_t tag, const ConnectCallback& callback, int timeoutMsec=-1, Address bindTo=Address());
+    Result tcp_connect(
+        Address address,
+        uint64_t tag,
+        const ConnectCallback& callback,
+        int timeoutMsec=-1,
+        bool tlsConnect=false,
+        Address bindTo=Address()
+    );
 
     void cancel_tcp_connect(uint64_t tag);
 
@@ -84,9 +95,6 @@ private:
     /// Ctor. private and called by create()
     Reactor();
 
-    // called by create()returns error code
-    ErrorCode initialize();
-
     /// Pollable objects' base
     struct Object {
         Object() = default;
@@ -107,7 +115,7 @@ private:
             return *this;
         }
 
-        ~Object() {
+        virtual ~Object() {
             async_close();
         }
 
@@ -129,18 +137,6 @@ private:
         uv_handle_t* _handle=0;
     };
 
-    struct ConnectContext {
-        uint64_t tag;
-        ConnectCallback callback;
-        uv_connect_t* request;
-    };
-
-    void connect_callback(ConnectContext* ctx, ErrorCode errorCode);
-
-    void connect_timeout_callback(uint64_t tag);
-
-    void cancel_tcp_connect_impl(std::unordered_map<uint64_t, ConnectContext>::iterator& it);
-
     ErrorCode init_asyncevent(Object* o, uv_async_cb cb);
 
     ErrorCode init_timer(Object* o);
@@ -150,18 +146,14 @@ private:
     ErrorCode init_tcpserver(Object* o, Address bindAddress, uv_connection_cb cb);
     ErrorCode init_tcpstream(Object* o);
     ErrorCode accept_tcpstream(Object* acceptor, Object* newConnection);
-    void shutdown_tcpstream(Object* o, BufferChain&& unsent);
+    TcpStream* stream_connected(TcpStream* stream, uv_handle_t* h);
+    void shutdown_tcpstream(Object* o);
+
+    using OnDataWritten = std::function<void(ErrorCode, size_t)>;
+    ErrorCode async_write(Reactor::Object* o, BufferChain& unsent, const OnDataWritten& cb);
 
     ErrorCode init_object(ErrorCode errorCode, Object* o, uv_handle_t* h);
     void async_close(uv_handle_t*& handle);
-
-    struct WriteRequest {
-        uv_write_t req;
-        size_t n;
-    };
-
-    WriteRequest* alloc_write_request();
-    void release_write_request(WriteRequest*& req);
 
     union Handles {
         uv_timer_t timer;
@@ -172,19 +164,19 @@ private:
     uv_loop_t _loop;
     uv_async_t _stopEvent;
     MemPool<uv_handle_t, sizeof(Handles)> _handlePool;
-    MemPool<uv_connect_t, sizeof(uv_connect_t)> _connectRequestsPool;
-    MemPool<WriteRequest, sizeof(WriteRequest)> _writeRequestsPool;
-    MemPool<uv_shutdown_t, sizeof(uv_shutdown_t)> _shutdownRequestsPool;
-    std::unordered_map<uint64_t, ConnectContext> _connectRequests;
-    std::unordered_set<uv_shutdown_t*> _shutdownRequests;
-    std::unordered_map<uv_shutdown_t*, BufferChain> _unsent;
-    std::unordered_set<uv_connect_t*> _cancelledConnectRequests;
-    std::unique_ptr<CoarseTimer> _connectTimer;
     bool _creatingInternalObjects=false;
 
+    std::unique_ptr<PendingWrites> _pendingWrites;
+    std::unique_ptr<TcpConnectors> _tcpConnectors;
+    std::unique_ptr<TcpShutdowns> _tcpShutdowns;
+
+    friend class TcpConnectors;
+    friend class TcpShutdowns;
+    friend class PendingWrites;
     friend class AsyncEvent;
     friend class Timer;
     friend class TcpServer;
+    friend class SslServer;
     friend class TcpStream;
 };
 

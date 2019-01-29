@@ -76,7 +76,7 @@ void aes_gen_tables(void)
 	for (i = 0, x = 1; i < 256; i++, x ^= XTIME(x))
 	{
 		pow[i] = x;
-		log[x] = i;
+		log[x] = static_cast<uint8_t>(i);
 	}
 
 	/* calculate the round constants */
@@ -817,11 +817,9 @@ void AES::StreamCipher::Reset()
 void AES::StreamCipher::PerfXor(uint8_t* pBuf, uint32_t nSize)
 {
 	assert(m_nBuf >= nSize);
-	const uint8_t* pXor = m_pBuf + _countof(m_pBuf) - m_nBuf;
-	m_nBuf -= nSize;
 
-	for (uint32_t i = 0; i < nSize; i++)
-		pBuf[i] ^= pXor[i];
+	memxor(pBuf, m_pBuf + _countof(m_pBuf) - m_nBuf, nSize);
+	m_nBuf -= (uint8_t) nSize;
 }
 
 void AES::StreamCipher::XCrypt(const Encoder& enc, uint8_t* pBuf, uint32_t nSize)

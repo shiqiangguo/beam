@@ -1,12 +1,22 @@
 set (TARGET_NAME "beam-wallet-ui")
-if(LINUX)
-    set (OUTPUT_NAME "BeamWallet")
+
+if (BEAM_TESTNET)
+    if(LINUX)
+        set (OUTPUT_NAME "BeamWalletTestnet")
+    else()
+        set (OUTPUT_NAME "Beam Wallet Testnet")
+    endif()
 else()
-    set (OUTPUT_NAME "Beam Wallet")
+    if(LINUX)
+        set (OUTPUT_NAME "BeamWallet")
+    else()
+        set (OUTPUT_NAME "Beam Wallet")
+    endif()
 endif()
+
 set (CMAKE_PREFIX_PATH $ENV{QT5_ROOT_DIR})
 
-find_package(Qt5 COMPONENTS Qml Quick Svg REQUIRED)
+find_package(Qt5 COMPONENTS Qml Quick Svg PrintSupport REQUIRED)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_AUTOMOC ON)
@@ -16,6 +26,9 @@ if(MSVC)
 	else()
 		set(SYSTEM_TYPE WIN32)
 	endif()
+
+    set_source_files_properties(ui.cpp PROPERTIES COMPILE_FLAGS "/wd4127") # QtCore/qvarlengtharray.h(274): warning C4127: conditional expression is constant
+
 elseif(APPLE)
 	set(MACOSX_BUNDLE_ICON_FILE beam.icns)
 	set(SYSTEM_TYPE MACOSX_BUNDLE)
@@ -35,6 +48,8 @@ set(UI_SRC
 	translator.cpp
 	viewmodel/start_view.h
 	viewmodel/start_view.cpp
+    viewmodel/restore_view.h
+	viewmodel/restore_view.cpp
 	viewmodel/utxo_view.h
 	viewmodel/utxo_view.cpp
 	viewmodel/main_view.h
@@ -55,6 +70,8 @@ set(UI_SRC
 	viewmodel/ui_helpers.cpp
 	viewmodel/messages_view.h
     viewmodel/messages_view.cpp
+    viewmodel/statusbar_view.h
+    viewmodel/statusbar_view.cpp
 
 	model/wallet_model.h
 	model/wallet_model.cpp
@@ -71,7 +88,7 @@ set(UI_SRC
 if(WIN32)
 	add_definitions(-DWIN32_LEAN_AND_MEAN)
 endif()
-
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/beam.rc.in ${CMAKE_CURRENT_SOURCE_DIR}/beam.rc)
 add_executable(${TARGET_NAME} ${SYSTEM_TYPE} ${UI_SRC} ${QT_RESOURCES} beam.rc ${MACOSX_BUNDLE_ICON_FILE})
 set_target_properties(${TARGET_NAME} PROPERTIES OUTPUT_NAME ${OUTPUT_NAME})
 
@@ -79,39 +96,42 @@ if(APPLE)
 	set_target_properties(${TARGET_NAME} PROPERTIES MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/Info.plist)
 endif()
 
-configure_file("${CMAKE_SOURCE_DIR}/version.h.in" "${CMAKE_CURRENT_BINARY_DIR}/version.h")
+configure_file("${PROJECT_SOURCE_DIR}/version.h.in" "${CMAKE_CURRENT_BINARY_DIR}/version.h")
 
-add_dependencies(${TARGET_NAME} wallet)
+add_dependencies(${TARGET_NAME} wallet mnemonic qrcode)
+target_link_libraries(${TARGET_NAME} qrcode)
+
+if(BEAM_USE_GPU)
+    add_dependencies(${TARGET_NAME} gpu_tools)
+    target_link_libraries(${TARGET_NAME} gpu_tools)
+endif()
 
 if(LINUX)
 	set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
 
 # link with QuaZip library
-include_directories(${CMAKE_PREFIX_PATH}/include/QtZlib)
-include_directories(quazip)
+target_include_directories(${TARGET_NAME} PRIVATE ${CMAKE_PREFIX_PATH}/include/QtZlib)
+target_include_directories(${TARGET_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/3rdparty/quazip)
 add_definitions(-DQUAZIP_STATIC)
-file(GLOB QUAZIP_SRCS "quazip/quazip/*.c" "quazip/quazip/*.cpp")
-file(GLOB PUBLIC_HEADERS "quazip/quazip/*.h")
-qt_wrap_cpp(MOC_SRCS ${PUBLIC_HEADERS})
-set(QUAZIP_ALL_SRCS ${QUAZIP_SRCS} ${MOC_SRCS})
-include_directories(${Qt5Core_INCLUDE_DIRS})
-add_library(quazip_static STATIC ${QUAZIP_ALL_SRCS})
-
-if(UNIX)
-	target_link_libraries(quazip_static z)
-endif()
 
 add_dependencies(${TARGET_NAME} quazip_static)
 target_link_libraries(${TARGET_NAME} quazip_static)
 
 #if (BEAM_WALLET_WITH_NODE)
 	add_definitions(-DBEAM_WALLET_WITH_NODE)
-	add_dependencies(${TARGET_NAME} node)
-	target_link_libraries(${TARGET_NAME} node)
+	add_dependencies(${TARGET_NAME} node external_pow)
+	target_link_libraries(${TARGET_NAME} node external_pow)
 #endif()
 
-target_link_libraries(${TARGET_NAME} wallet Qt5::Qml Qt5::Quick Qt5::Svg)
+target_link_libraries(${TARGET_NAME} wallet mnemonic Qt5::Qml Qt5::Quick Qt5::Svg Qt5::PrintSupport)
+
+if (BEAM_SIGN_PACKAGE AND WIN32)
+    add_custom_command(
+        TARGET ${TARGET_NAME} POST_BUILD
+        COMMAND ${SIGNTOOL_EXECUTABLE} sign ${SIGNTOOL_OPTIONS} "${CMAKE_CURRENT_BINARY_DIR}\\Beam Wallet.exe"
+    )
+endif()
 
 if(BEAM_USE_STATIC)
 
@@ -129,7 +149,7 @@ if(BEAM_USE_STATIC)
 			lib/Qt5Charts lib/Qt5Gui lib/Qt5PositioningQuick lib/Qt5QuickWidgets lib/Qt5Test lib/Qt5Xml qml/QtQuick.2/qtquick2plugin
 			qml/QtQuick/Window.2/windowplugin qml/QtQuick/Controls/qtquickcontrolsplugin qml/QtGraphicalEffects/qtgraphicaleffectsplugin
 			qml/QtGraphicalEffects/private/qtgraphicaleffectsprivate qml/QtQuick/Layouts/qquicklayoutsplugin qml/QtQuick/Controls.2/qtquickcontrols2plugin
-			qml/QtQuick/Templates.2/qtquicktemplates2plugin plugins/platforms/qwindows plugins/imageformats/qsvg)
+			qml/QtQuick/Templates.2/qtquicktemplates2plugin plugins/platforms/qwindows plugins/imageformats/qsvg plugins/printsupport/windowsprintersupport)
 
 			target_link_libraries(${TARGET_NAME} ${CMAKE_PREFIX_PATH}/${lib}.lib)
 		endforeach()
@@ -158,7 +178,7 @@ if(BEAM_USE_STATIC)
 			qml/QtQuick.2/libqtquick2plugin qml/QtQuick/Window.2/libwindowplugin qml/QtQuick/Controls/libqtquickcontrolsplugin
 			qml/QtGraphicalEffects/libqtgraphicaleffectsplugin qml/QtGraphicalEffects/private/libqtgraphicaleffectsprivate
 			qml/QtQuick/Layouts/libqquicklayoutsplugin qml/QtQuick/Controls.2/libqtquickcontrols2plugin qml/QtQuick/Templates.2/libqtquicktemplates2plugin
-			plugins/platforms/libqcocoa plugins/platforms/libqminimal plugins/imageformats/libqsvg)
+			plugins/platforms/libqcocoa plugins/platforms/libqminimal plugins/imageformats/libqsvg plugins/printsupport/libcocoaprintersupport)
 
 			target_link_libraries(${TARGET_NAME} ${CMAKE_PREFIX_PATH}/${lib}.a)
 		endforeach()
@@ -191,6 +211,7 @@ if(BEAM_USE_STATIC)
 
 		target_link_libraries(${TARGET_NAME}
 			${CMAKE_PREFIX_PATH}/plugins/platforms/libqxcb.a
+			${CMAKE_PREFIX_PATH}/plugins/xcbglintegrations/libqxcb-glx-integration.a
 		)
 
 		target_link_libraries(${TARGET_NAME}
@@ -204,6 +225,7 @@ if(BEAM_USE_STATIC)
 			${CMAKE_PREFIX_PATH}/qml/QtQuick/Templates.2/libqtquicktemplates2plugin.a
 
 			${CMAKE_PREFIX_PATH}/plugins/imageformats/libqsvg.a
+            ${CMAKE_PREFIX_PATH}/plugins/printsupport/libcupsprintersupport.a
 		)
 
 		foreach(lib
@@ -218,12 +240,16 @@ if(BEAM_USE_STATIC)
 			Qt5FbSupport Qt5Qml Qt5Test
 			Qt5Concurrent Qt5FontDatabaseSupport Qt5Network Qt5QmlDebug
 			Qt5Xml xcb-static Qt5Gamepad Qt5NetworkAuth Qt5QmlDevTools
-			Qt5Scxml Qt5ThemeSupport Qt5XmlPatterns Qt5DBus qtfreetype
+			Qt5Scxml Qt5ThemeSupport Qt5XmlPatterns Qt5DBus Qt5GlxSupport
 		)
 			target_link_libraries(${TARGET_NAME} ${CMAKE_PREFIX_PATH}/lib/lib${lib}.a)
 		endforeach()
 
-		target_link_libraries(${TARGET_NAME} -lX11-xcb -lX11 -lxcb -licui18n -licuuc -licudata -lGL)
+		target_link_libraries(${TARGET_NAME} -lX11-xcb -lX11 -lxcb -lGL -lfreetype -lfontconfig -lXi -lXext -lXfixes -lXrender -lglib-2.0 -lSM -lICE -lcups -lxcb-glx)
+
+		foreach(lib icui18n icuuc icudata)
+			target_link_libraries(${TARGET_NAME} /usr/lib/x86_64-linux-gnu/lib${lib}.a)
+		endforeach()
 
 		set_property(TARGET ${TARGET_NAME} PROPERTY POSITION_INDEPENDENT_CODE ON)
 
@@ -250,4 +276,13 @@ else()
 	endif()
 
 	install(TARGETS ${TARGET_NAME} DESTINATION .)
+
+    # Signing the installer
+    #add_custom_target(signing-installer)
+    #
+    #message(BEAM_INSTALLER_NAME = ${BEAM_INSTALLER_NAME})
+    #add_custom_command(
+    #    TARGET signing-installer
+    #    COMMAND ${SIGNTOOL_EXECUTABLE} sign ${SIGNTOOL_OPTIONS} ${CMAKE_CURRENT_BINARY_DIR}\\${BEAM_INSTALLER_NAME}
+    #  )
 endif()
