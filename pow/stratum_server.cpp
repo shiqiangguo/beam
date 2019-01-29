@@ -125,6 +125,7 @@ bool Server::on_solution(uint64_t from, const Solution& sol) {
 
 	_recentResult.id = sol.id;
     sol.fill_pow(_recentResult.pow);
+    _recentResult.resultFrom = from;
 
     LOG_INFO() << STS << "solution to " << sol.id << " from " << io::Address::from_u64(from);
 	_recentResult.onBlockFound();
@@ -140,6 +141,7 @@ void Server::new_job(
     const std::string& id,
     const Merkle::Hash& input,
     const Block::PoW& pow,
+    const Height& height,
     const BlockFound& callback,
     const CancelCallback& /* cancelCallback */
 ) {
@@ -149,6 +151,7 @@ void Server::new_job(
     LOG_INFO() << STS << "new job " << id << " will be sent to " << _connections.size() << " connected peers";
 
     Job jobMsg(id, input, pow);
+    jobMsg.height = height;
     append_json_msg(_fw, jobMsg);
 	_recentJob.msg.swap(_currentMsg);
     _currentMsg.clear();
@@ -167,6 +170,25 @@ void Server::new_job(
     // TODO job cancel policy - timer
 }
 
+void Server::solution_result(const std::string& jobID, 
+        bool accepted, const beam::Block::SystemState::ID& blockId) {
+
+     if (!accepted){
+        Result res(jobID, solution_rejected);
+        append_json_msg(_fw, res);
+    }else{
+        char buf[80] = {0};
+        to_hex(buf, blockId.m_Hash.m_pData, 32);
+
+         SolutionResult res(jobID, solution_accepted, buf, blockId.m_Height);
+        append_json_msg(_fw, res);
+    }
+
+     _connections[_recentResult.resultFrom]->send_msg(_currentMsg, true);
+    _currentMsg.clear();
+
+ }
+ 
 void Server::get_last_found_block(std::string& jobID, Block::PoW& pow) {
     jobID = _recentResult.id;
     pow = _recentResult.pow;

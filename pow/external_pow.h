@@ -43,8 +43,12 @@ public:
         const std::string& jobID,
         const Merkle::Hash& input,
         const Block::PoW& pow,
+        const Height& height,
         const BlockFound& callback,
         const CancelCallback& cancelCallback) = 0;
+
+    virtual void solution_result(const std::string& jobID, 
+        bool accepted, const beam::Block::SystemState::ID& blockId){};
 
     virtual void get_last_found_block(std::string& jobID, Block::PoW& pow) = 0;
 

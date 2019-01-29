@@ -94,6 +94,7 @@ struct Login : Message {
 struct Job : Message {
     std::string input;
     uint32_t difficulty;
+    Height height;
 
     Job() = default;
 
@@ -131,6 +132,16 @@ struct Result : Message {
         Message(std::move(_id), result),
         code(_code),
         description(get_result_msg(_code))
+    {}
+};
+
+struct SolutionResult : Result {
+    std::string hash;
+    Height height;
+    SolutionResult(std::string _id, ResultCode _code, std::string _hash, Height _height) :
+        Result(_id, _code),
+        hash(_hash),
+        height(_height)
     {}
 };
 
