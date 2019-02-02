@@ -174,6 +174,7 @@ void Server::solution_result(const std::string& jobID,
         bool accepted, const beam::Block::SystemState::ID& blockId) {
 
      if (!accepted){
+         LOG_INFO() << STS << "<<=== Solution Rejected! jobid:" << jobId
         Result res(jobID, solution_rejected);
         append_json_msg(_fw, res);
     }else{

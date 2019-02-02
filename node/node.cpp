@@ -3487,7 +3487,7 @@ void Node::Miner::OnMinedExternal()
 
     if (bReject)
     {
-        LOG_INFO() << "Solution is rejected due it is outdated.";
+        LOG_INFO() << "Solution is rejected due it is outdated. m_External.m_jobID:"<< m_External.m_jobID << " jobID=" << jobID << " m_External.m_ppTask.countOf:" << _countof(m_External.m_ppTask) ;
         m_External.m_pSolver->solution_result(jobID_, false, nullID);
 		return; // outdated
     }
